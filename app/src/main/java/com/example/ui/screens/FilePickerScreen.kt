@@ -13,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +33,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -71,7 +74,6 @@ import com.example.picker.PickerAppItem
 import com.example.picker.PickerCategory
 import com.example.picker.PickerMediaItem
 import com.example.picker.PickerThumbnailCache
-import com.example.picker.StorageLocation
 import com.example.picker.toFileItem
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
@@ -127,7 +129,6 @@ fun FilePickerScreen(
     var activeCategory by remember { mutableStateOf(PickerCategory.IMAGE) }
     var isScanningMedia by remember { mutableStateOf(false) }
     var isScanningApps by remember { mutableStateOf(false) }
-    var hasSdCard by remember { mutableStateOf(false) }
 
     var images by remember { mutableStateOf<List<PickerMediaItem>>(emptyList()) }
     var videos by remember { mutableStateOf<List<PickerMediaItem>>(emptyList()) }
@@ -152,7 +153,6 @@ fun FilePickerScreen(
 
     // Request storage permissions once if not already granted
     LaunchedEffect(Unit) {
-        hasSdCard = DeviceMediaScanner.detectHasSdCard(context)
         if (!hasMediaPermission && !permissionPromptedOnce) {
             permissionPromptedOnce = true
             onExternalPermissionLaunch()
@@ -160,8 +160,8 @@ fun FilePickerScreen(
         }
     }
 
-    // Scan installed apps (no runtime permission needed with <queries>)
-    LaunchedEffect(scanNonce) {
+    // Scan installed apps and APK files
+    LaunchedEffect(hasMediaPermission, scanNonce) {
         isScanningApps = true
         apps = DeviceMediaScanner.scanInstalledApps(context)
         isScanningApps = false
@@ -169,19 +169,12 @@ fun FilePickerScreen(
 
     // Scan Internal + SD Card media files
     LaunchedEffect(hasMediaPermission, scanNonce) {
-        hasSdCard = DeviceMediaScanner.detectHasSdCard(context)
         if (hasMediaPermission) {
             isScanningMedia = true
             val (scannedImages, scannedVideos, scannedMusic) = DeviceMediaScanner.scanMediaFiles(context)
             images = scannedImages
             videos = scannedVideos
             music = scannedMusic
-            if (scannedImages.any { it.storageLocation == StorageLocation.SD_CARD } ||
-                scannedVideos.any { it.storageLocation == StorageLocation.SD_CARD } ||
-                scannedMusic.any { it.storageLocation == StorageLocation.SD_CARD }
-            ) {
-                hasSdCard = true
-            }
             isScanningMedia = false
         }
     }
@@ -200,7 +193,6 @@ fun FilePickerScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             AppTopBar(
                 title = "Select Files",
-                subtitle = if (hasSdCard) "Internal & SD Card" else "Internal Storage",
                 onBackClick = onBackClick,
                 actions = {
                     // System file browser button in top-right corner
@@ -230,12 +222,14 @@ fun FilePickerScreen(
                 }
             )
 
-            // 4-Category Tab Strip (Image, Video, Music, Apps)
+            // 4-Category Pill Icon Menu (Image, Video, Music, Apps)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 PickerCategory.entries.forEach { category ->
                     val isSelected = activeCategory == category
@@ -252,14 +246,12 @@ fun FilePickerScreen(
                         PickerCategory.APPS -> AppIcons.Apps
                     }
 
-                    CategoryTabChip(
+                    CategoryPillChip(
                         label = category.label,
                         count = count,
                         icon = icon,
                         selected = isSelected,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("picker_tab_${category.name.lowercase()}"),
+                        modifier = Modifier.testTag("picker_tab_${category.name.lowercase()}"),
                         onClick = { activeCategory = category }
                     )
                 }
@@ -285,7 +277,7 @@ fun FilePickerScreen(
                                 onBrowseClick = onSystemBrowseClick
                             )
                         } else if (isScanningMedia && images.isEmpty()) {
-                            ScanningIndicator("Scanning Internal & SD Card images...")
+                            ScanningIndicator("Scanning images...")
                         } else if (images.isEmpty()) {
                             EmptyPickerState(
                                 icon = AppIcons.Image,
@@ -337,7 +329,7 @@ fun FilePickerScreen(
                                 onBrowseClick = onSystemBrowseClick
                             )
                         } else if (isScanningMedia && videos.isEmpty()) {
-                            ScanningIndicator("Scanning Internal & SD Card videos...")
+                            ScanningIndicator("Scanning videos...")
                         } else if (videos.isEmpty()) {
                             EmptyPickerState(
                                 icon = AppIcons.Movie,
@@ -387,7 +379,7 @@ fun FilePickerScreen(
                                 onBrowseClick = onSystemBrowseClick
                             )
                         } else if (isScanningMedia && music.isEmpty()) {
-                            ScanningIndicator("Scanning Internal & SD Card audio...")
+                            ScanningIndicator("Scanning audio...")
                         } else if (music.isEmpty()) {
                             EmptyPickerState(
                                 icon = AppIcons.MusicNote,
@@ -428,15 +420,15 @@ fun FilePickerScreen(
 
                     PickerCategory.APPS -> {
                         if (isScanningApps && apps.isEmpty()) {
-                            ScanningIndicator("Loading installed apps...")
+                            ScanningIndicator("Loading apps & APKs...")
                         } else if (apps.isEmpty()) {
                             EmptyPickerState(
                                 icon = AppIcons.Apps,
-                                title = "No apps available",
-                                subtitle = "Installed apps with readable APKs appear here."
+                                title = "No apps or APKs found",
+                                subtitle = "Installed apps and .apk files on your device appear here."
                             )
                         } else {
-                            // 4. Apps Grid View (5 columns), app icons as thumbnails
+                            // 4. Apps Grid View (5 columns), app/APK icons as thumbnails
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(5),
                                 modifier = Modifier
@@ -451,16 +443,16 @@ fun FilePickerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(apps, key = { it.packageName }) { app ->
-                                    val isAppSelected = selectedApps.containsKey(app.packageName)
+                                items(apps, key = { it.id }) { app ->
+                                    val isAppSelected = selectedApps.containsKey(app.id)
                                     AppGridCell(
                                         app = app,
                                         isSelected = isAppSelected,
                                         onClick = {
                                             if (isAppSelected) {
-                                                selectedApps.remove(app.packageName)
+                                                selectedApps.remove(app.id)
                                             } else {
-                                                selectedApps[app.packageName] = app
+                                                selectedApps[app.id] = app
                                             }
                                         }
                                     )
@@ -553,7 +545,7 @@ fun FilePickerScreen(
 }
 
 @Composable
-private fun CategoryTabChip(
+private fun CategoryPillChip(
     label: String,
     count: Int,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -562,18 +554,20 @@ private fun CategoryTabChip(
     onClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val bgColor = if (selected) colors.primary.copy(alpha = 0.16f) else colors.surfaceVariant
+    val bgColor = if (selected) colors.primary else colors.surfaceVariant
     val borderColor = if (selected) colors.primary else colors.outline
-    val contentColor = if (selected) colors.primary else colors.onSurfaceVariant
+    val contentColor = if (selected) colors.onPrimary else colors.onSurfaceVariant
 
-    Column(
+    Row(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .heightIn(min = 48.dp)
+            .clip(CircleShape)
             .background(bgColor)
-            .border(if (selected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(16.dp))
+            .border(if (selected) 1.5.dp else 1.dp, borderColor, CircleShape)
             .clickable { onClick() }
-            .padding(vertical = 10.dp, horizontal = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Icon(
             imageVector = icon,
@@ -581,20 +575,33 @@ private fun CategoryTabChip(
             tint = contentColor,
             modifier = Modifier.size(18.dp)
         )
-        Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) colors.onSurface else colors.onSurfaceVariant,
-            maxLines = 1
-        )
-        Text(
-            text = count.toString(),
-            style = MaterialTheme.typography.labelSmall,
             color = contentColor,
             maxLines = 1
         )
+        if (count > 0) {
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(
+                        if (selected) colors.onPrimary.copy(alpha = 0.16f)
+                        else colors.outline.copy(alpha = 0.4f)
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = contentColor,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 
@@ -658,25 +665,6 @@ private fun ImageGridCell(
             )
         }
 
-        // SD Card badge
-        if (item.storageLocation == StorageLocation.SD_CARD) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = "SD",
-                    color = Color.White,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
         // Selection circle indicator
         SelectionDot(
             selected = isSelected,
@@ -693,17 +681,7 @@ private fun VideoListRow(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
-
-    val thumbnail by produceState<ImageBitmap?>(
-        initialValue = PickerThumbnailCache.getCached("vid:${item.uriString}"),
-        key1 = item.uriString
-    ) {
-        if (value == null) {
-            value = PickerThumbnailCache.loadVideoThumbnail(context, item.uriString)
-        }
-    }
 
     Row(
         modifier = Modifier
@@ -716,48 +694,23 @@ private fun VideoListRow(
                 shape = RoundedCornerShape(16.dp)
             )
             .clickable { onClick() }
-            .padding(10.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Video thumbnail box
         Box(
             modifier = Modifier
-                .size(width = 72.dp, height = 52.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(colors.surface),
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.primary.copy(alpha = 0.14f))
+                .border(1.dp, colors.primary.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
-            val bmp = thumbnail
-            if (bmp != null) {
-                Image(
-                    bitmap = bmp,
-                    contentDescription = item.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Icon(
-                    imageVector = AppIcons.Movie,
-                    contentDescription = null,
-                    tint = colors.outlineVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.6f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = AppIcons.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
+            Icon(
+                imageVector = AppIcons.Movie,
+                contentDescription = null,
+                tint = colors.primary,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -790,8 +743,6 @@ private fun VideoListRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                StorageChip(item.storageLocation)
             }
         }
 
@@ -884,8 +835,6 @@ private fun MusicListRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                StorageChip(item.storageLocation)
             }
         }
 
@@ -907,11 +856,11 @@ private fun AppGridCell(
     val colors = MaterialTheme.colorScheme
 
     val appIcon by produceState<ImageBitmap?>(
-        initialValue = PickerThumbnailCache.getCached("app:${app.packageName}"),
-        key1 = app.packageName
+        initialValue = PickerThumbnailCache.getCached("app:${app.id}"),
+        key1 = app.id
     ) {
         if (value == null) {
-            value = PickerThumbnailCache.loadAppIcon(context, app.packageName)
+            value = PickerThumbnailCache.loadAppIcon(context, app)
         }
     }
 
@@ -961,6 +910,23 @@ private fun AppGridCell(
                 }
             }
 
+            if (app.isStandaloneApk) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(colors.secondary)
+                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = "APK",
+                        color = colors.onSecondary,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             if (isSelected) {
                 SelectionDot(
                     selected = true,
@@ -972,7 +938,11 @@ private fun AppGridCell(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = app.appName,
+            text = if (app.isStandaloneApk && !app.fileNameOverride.isNullOrBlank()) {
+                app.fileNameOverride
+            } else {
+                app.appName
+            },
             fontSize = 10.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
             color = colors.onSurface,
@@ -985,27 +955,6 @@ private fun AppGridCell(
             fontSize = 9.sp,
             color = colors.onSurfaceVariant,
             maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun StorageChip(location: StorageLocation) {
-    val colors = MaterialTheme.colorScheme
-    val isSd = location == StorageLocation.SD_CARD
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(
-                if (isSd) colors.tertiary.copy(alpha = 0.16f) else colors.outline.copy(alpha = 0.35f)
-            )
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-    ) {
-        Text(
-            text = location.label,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (isSd) colors.tertiary else colors.onSurfaceVariant
         )
     }
 }
@@ -1147,7 +1096,7 @@ private fun MediaPermissionPrompt(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Grant media access to scan $categoryLabel from both Internal Storage and SD Card, or use Browse in the top right.",
+            text = "Grant media access to scan $categoryLabel on your device, or use Browse in the top right.",
             style = MaterialTheme.typography.bodyMedium,
             color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center

@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/ic_app_logo_1794498162469"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Send Arrow (Upward) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,27 L52,43 L44,43 L44,75 C44,76.66 42.66,78 41,78 L37,78 C35.34,78 34,76.66 34,75 L34,43 L26,43 Z" />
+
+    <!-- Receive Arrow (Downward) -->
+    <path
+        android:fillColor="#CFFAFE"
+        android:pathData="M69,81 L56,65 L64,65 L64,33 C64,31.34 65.34,30 67,30 L71,30 C72.66,30 74,31.34 74,33 L74,65 L82,65 Z" />
+
+</vector>

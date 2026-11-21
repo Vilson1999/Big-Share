@@ -499,7 +499,7 @@ class FileTransferEngine(private val context: Context) {
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                     put(MediaStore.Downloads.MIME_TYPE, safeMime)
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Mini Share")
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Big Share")
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
@@ -551,7 +551,7 @@ class FileTransferEngine(private val context: Context) {
         val safeName = sanitizeFileName(fileName)
         val publicMiniShare = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "Mini Share"
+            "Big Share"
         )
         val targetDir = try {
             if (!publicMiniShare.exists()) {
@@ -562,13 +562,13 @@ class FileTransferEngine(private val context: Context) {
             } else {
                 File(
                     context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
-                    "Mini Share"
+                    "Big Share"
                 ).apply { mkdirs() }
             }
         } catch (_: Exception) {
             File(
                 context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
-                "Mini Share"
+                "Big Share"
             ).apply { mkdirs() }
         }
 

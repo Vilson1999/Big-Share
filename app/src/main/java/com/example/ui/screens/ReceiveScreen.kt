@@ -30,11 +30,13 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.RadarAnimation
+import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
 
 @Composable
 fun ReceiveScreen(
     userName: String,
+    userAvatarIndex: Int = 0,
     thisDevice: WifiP2pDevice?,
     onBackClick: () -> Unit
 ) {
@@ -121,19 +123,22 @@ fun ReceiveScreen(
                     }
                 }
 
-                // Radar Beacon Visual
+                // Radar Beacon Visual with big user photo & waves
                 Box(
                     modifier = Modifier
-                        .size(290.dp)
+                        .size(308.dp)
                         .clip(CircleShape)
                         .background(colors.surfaceVariant.copy(alpha = 0.35f))
                         .border(1.dp, colors.secondary.copy(alpha = 0.25f), CircleShape)
-                        .padding(14.dp),
+                        .padding(10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     RadarAnimation(
                         modifier = Modifier.fillMaxSize(),
-                        radarColor = colors.secondary
+                        radarColor = colors.secondary,
+                        avatarDrawableRes = UserAvatarCatalog.getDrawableRes(userAvatarIndex),
+                        avatarSize = 132.dp,
+                        isActive = true
                     )
                 }
 
@@ -164,7 +169,7 @@ fun ReceiveScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Incoming files save to Downloads/Mini Share",
+                        text = "Incoming files save to Downloads/Big Share",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         fontSize = 12.sp

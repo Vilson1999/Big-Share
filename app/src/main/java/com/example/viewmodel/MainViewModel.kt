@@ -36,7 +36,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val bluetoothDiscoveryHelper = BluetoothDiscoveryHelper(application)
     private val transferEngine = FileTransferEngine(application)
 
-    private val _currentScreen = MutableStateFlow(AppScreen.HOME)
+    private val prefs = application.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+    private val _isProfileCompleted = MutableStateFlow(
+        prefs.getBoolean("profile_completed", false)
+    )
+    val isProfileCompleted: StateFlow<Boolean> = _isProfileCompleted.asStateFlow()
+
+    private val _currentScreen = MutableStateFlow(
+        if (_isProfileCompleted.value) AppScreen.HOME else AppScreen.PROFILE
+    )
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
     private val _selectedFiles = MutableStateFlow<List<FileItem>>(emptyList())
@@ -73,11 +81,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val thisDevice = wifiDirectManager.thisDevice
     val isConnected = wifiDirectManager.isConnected
 
-    private val prefs = application.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val _userName = MutableStateFlow(
         prefs.getString("user_name", null) ?: (android.os.Build.MODEL ?: "User")
     )
     val userName: StateFlow<String> = _userName.asStateFlow()
+
+    private val _userAvatarIndex = MutableStateFlow(
+        prefs.getInt("user_avatar_index", 0).coerceIn(0, 9)
+    )
+    val userAvatarIndex: StateFlow<Int> = _userAvatarIndex.asStateFlow()
 
     fun updateUserName(name: String) {
         val trimmed = name.trim()
@@ -85,6 +97,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _userName.value = trimmed
             prefs.edit().putString("user_name", trimmed).apply()
         }
+    }
+
+    fun openProfile() {
+        _transferError.value = null
+        _currentScreen.value = AppScreen.PROFILE
+    }
+
+    fun saveUserProfile(name: String, avatarIndex: Int) {
+        val trimmed = name.trim().ifEmpty { _userName.value }
+        val safeAvatar = avatarIndex.coerceIn(0, 9)
+        _userName.value = trimmed
+        _userAvatarIndex.value = safeAvatar
+        _isProfileCompleted.value = true
+        prefs.edit()
+            .putString("user_name", trimmed)
+            .putInt("user_avatar_index", safeAvatar)
+            .putBoolean("profile_completed", true)
+            .apply()
+        _currentScreen.value = AppScreen.HOME
     }
 
     init {
@@ -497,7 +528,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _transferStats.value = TransferStats()
         _isTransferComplete.value = false
         _transferError.value = null
-        _currentScreen.value = AppScreen.HOME
+        _currentScreen.value = if (_isProfileCompleted.value) AppScreen.HOME else AppScreen.PROFILE
     }
 
     override fun onCleared() {

@@ -54,15 +54,37 @@ data class PickerMediaItem(
 )
 
 data class PickerAppItem(
+    val id: String,
     val packageName: String,
     val appName: String,
     val versionName: String,
     val apkPath: String,
-    val sizeBytes: Long
+    val uriString: String,
+    val sizeBytes: Long,
+    val isStandaloneApk: Boolean = false,
+    val fileNameOverride: String? = null
 ) {
-    val id: String get() = "app:$packageName"
+    constructor(
+        packageName: String,
+        appName: String,
+        versionName: String,
+        apkPath: String,
+        sizeBytes: Long
+    ) : this(
+        id = "app:$packageName",
+        packageName = packageName,
+        appName = appName,
+        versionName = versionName,
+        apkPath = apkPath,
+        uriString = Uri.fromFile(File(apkPath)).toString(),
+        sizeBytes = sizeBytes,
+        isStandaloneApk = false,
+        fileNameOverride = null
+    )
+
     val shareFileName: String
         get() {
+            if (!fileNameOverride.isNullOrBlank()) return fileNameOverride
             val cleanName = appName.replace(Regex("[^a-zA-Z0-9._ -]"), "_").trim()
                 .ifEmpty { packageName }
             val cleanVersion = versionName.replace(Regex("[^a-zA-Z0-9._-]"), "").trim()
@@ -91,7 +113,7 @@ fun PickerAppItem.toFileItem(): FileItem = FileItem(
     id = UUID.randomUUID().toString(),
     name = shareFileName,
     sizeBytes = sizeBytes,
-    uriString = Uri.fromFile(File(apkPath)).toString(),
+    uriString = uriString,
     mimeType = "application/vnd.android.package-archive",
     status = TransferStatus.PENDING
 )
@@ -200,14 +222,31 @@ object PickerThumbnailCache {
         return imageBitmap
     }
 
-    suspend fun loadAppIcon(context: Context, packageName: String): ImageBitmap? {
-        val key = "app:$packageName"
+    suspend fun loadAppIcon(context: Context, item: PickerAppItem): ImageBitmap? {
+        val key = "app:${item.id}"
         cache.get(key)?.let { return it }
 
         val bitmap = withContext(Dispatchers.IO) {
             try {
-                val drawable = context.packageManager.getApplicationIcon(packageName)
-                drawableToBitmap(drawable, 160)
+                val pm = context.packageManager
+                val drawable = if (!item.isStandaloneApk && item.packageName.isNotBlank()) {
+                    pm.getApplicationIcon(item.packageName)
+                } else if (item.apkPath.isNotBlank()) {
+                    val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        pm.getPackageArchiveInfo(item.apkPath, PackageManager.PackageInfoFlags.of(0L))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pm.getPackageArchiveInfo(item.apkPath, 0)
+                    }
+                    pkgInfo?.applicationInfo?.let { appInfo ->
+                        appInfo.sourceDir = item.apkPath
+                        appInfo.publicSourceDir = item.apkPath
+                        appInfo.loadIcon(pm)
+                    }
+                } else {
+                    null
+                }
+                drawable?.let { drawableToBitmap(it, 160) }
             } catch (_: Exception) {
                 null
             }
@@ -307,6 +346,15 @@ object DeviceMediaScanner {
     }
 
     suspend fun scanInstalledApps(context: Context): List<PickerAppItem> = withContext(Dispatchers.IO) {
+        val apks = mutableListOf<PickerAppItem>()
+        val seenApkPaths = HashSet<String>()
+        val seenApkSig = HashSet<String>()
+
+        for (volume in getMediaStoreVolumes(context)) {
+            queryApksFromVolume(context, volume, apks, seenApkPaths, seenApkSig)
+        }
+        scanApkStorageRootsFallback(context, apks, seenApkPaths, seenApkSig)
+
         val pm = context.packageManager
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -323,7 +371,7 @@ object DeviceMediaScanner {
         }
 
         val seenPackages = HashSet<String>()
-        val result = mutableListOf<PickerAppItem>()
+        val installed = mutableListOf<PickerAppItem>()
 
         for (info in resolveInfos) {
             val activityInfo = info.activityInfo ?: continue
@@ -347,7 +395,7 @@ object DeviceMediaScanner {
                 }
                 val version = pkgInfo.versionName ?: ""
 
-                result.add(
+                installed.add(
                     PickerAppItem(
                         packageName = pkg,
                         appName = label,
@@ -360,7 +408,143 @@ object DeviceMediaScanner {
             }
         }
 
-        result.sortedBy { it.appName.lowercase() }
+        apks.sortedBy { it.appName.lowercase() } + installed.sortedBy { it.appName.lowercase() }
+    }
+
+    private fun queryApksFromVolume(
+        context: Context,
+        volume: String,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>
+    ) {
+        val collection = MediaStore.Files.getContentUri(volume)
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.DISPLAY_NAME,
+            MediaStore.Files.FileColumns.SIZE,
+            MediaStore.Files.FileColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.DATA
+        )
+        val selection = "${MediaStore.Files.FileColumns.SIZE} > 0 AND (" +
+            "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE '%.apk' OR " +
+            "${MediaStore.Files.FileColumns.MIME_TYPE} = 'application/vnd.android.package-archive')"
+        try {
+            context.contentResolver.query(
+                collection,
+                projection,
+                selection,
+                null,
+                "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+                val nameCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DISPLAY_NAME)
+                val sizeCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE)
+                val dataCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val fileName = if (nameCol != -1) cursor.getString(nameCol) ?: "app_$id.apk" else "app_$id.apk"
+                    val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
+                    if (size <= 0L) continue
+                    val dataPath = if (dataCol != -1) cursor.getString(dataCol) else null
+                    val uri = ContentUris.withAppendedId(collection, id)
+                    if (!dataPath.isNullOrBlank()) seenPaths.add(dataPath)
+                    val sig = "apk:${fileName}_${size}"
+                    if (seenSig.add(sig)) {
+                        val displayLabel = resolveApkDisplayLabel(context, dataPath, fileName)
+                        out.add(
+                            PickerAppItem(
+                                id = "apk:$volume:$id",
+                                packageName = "",
+                                appName = displayLabel,
+                                versionName = "",
+                                apkPath = dataPath ?: "",
+                                uriString = uri.toString(),
+                                sizeBytes = size,
+                                isStandaloneApk = true,
+                                fileNameOverride = fileName
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun scanApkStorageRootsFallback(
+        context: Context,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>
+    ) {
+        for ((rootDir, _) in collectStorageRoots(context)) {
+            walkApkDirectory(context, rootDir, 0, out, seenPaths, seenSig)
+        }
+    }
+
+    private fun walkApkDirectory(
+        context: Context,
+        dir: File,
+        depth: Int,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>
+    ) {
+        if (depth > 4) return
+        val children = dir.listFiles() ?: return
+        for (file in children) {
+            val name = file.name
+            if (name.startsWith(".")) continue
+            if (file.isDirectory) {
+                if (name.equals("Android", ignoreCase = true) && depth <= 1) continue
+                walkApkDirectory(context, file, depth + 1, out, seenPaths, seenSig)
+            } else if (file.isFile && file.canRead() && file.length() > 0L && name.endsWith(".apk", ignoreCase = true)) {
+                val absPath = file.absolutePath
+                if (seenPaths.contains(absPath)) continue
+                val sig = "apk:${name}_${file.length()}"
+                if (seenPaths.add(absPath) && seenSig.add(sig)) {
+                    val displayLabel = resolveApkDisplayLabel(context, absPath, name)
+                    out.add(
+                        PickerAppItem(
+                            id = "apkfs:$absPath",
+                            packageName = "",
+                            appName = displayLabel,
+                            versionName = "",
+                            apkPath = absPath,
+                            uriString = Uri.fromFile(file).toString(),
+                            sizeBytes = file.length(),
+                            isStandaloneApk = true,
+                            fileNameOverride = name
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun resolveApkDisplayLabel(context: Context, apkPath: String?, fallbackName: String): String {
+        if (apkPath.isNullOrBlank()) return fallbackName
+        return try {
+            val pm = context.packageManager
+            val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageArchiveInfo(apkPath, PackageManager.PackageInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apkPath, 0)
+            }
+            val appInfo = pkgInfo?.applicationInfo
+            if (appInfo != null) {
+                appInfo.sourceDir = apkPath
+                appInfo.publicSourceDir = apkPath
+                appInfo.loadLabel(pm)?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: fallbackName
+            } else {
+                fallbackName
+            }
+        } catch (_: Exception) {
+            fallbackName
+        }
     }
 
     private fun getMediaStoreVolumes(context: Context): List<String> {

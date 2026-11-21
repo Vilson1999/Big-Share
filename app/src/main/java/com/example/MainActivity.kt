@@ -60,6 +60,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.AppScreen
 import com.example.ui.screens.FilePickerScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.RadarScreen
 import com.example.ui.screens.ReceiveScreen
 import com.example.ui.screens.TransferScreen
@@ -275,6 +276,8 @@ fun MainAppContent(
     val transferError by viewModel.transferError.collectAsStateWithLifecycle()
     val thisDevice by viewModel.thisDevice.collectAsStateWithLifecycle()
     val userName by viewModel.userName.collectAsStateWithLifecycle()
+    val userAvatarIndex by viewModel.userAvatarIndex.collectAsStateWithLifecycle()
+    val isProfileCompleted by viewModel.isProfileCompleted.collectAsStateWithLifecycle()
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
     val connectingDeviceAddress by viewModel.connectingDeviceAddress.collectAsStateWithLifecycle()
 
@@ -477,10 +480,30 @@ fun MainAppContent(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             when (currentScreen) {
+                AppScreen.PROFILE -> {
+                    if (isProfileCompleted) {
+                        BackHandler {
+                            viewModel.resetToHome()
+                        }
+                    }
+                    ProfileScreen(
+                        initialName = userName,
+                        initialAvatarIndex = userAvatarIndex,
+                        isFirstLaunch = !isProfileCompleted,
+                        onBackClick = if (isProfileCompleted) {
+                            { viewModel.resetToHome() }
+                        } else null,
+                        onSaveProfile = { name, avatarIndex ->
+                            viewModel.saveUserProfile(name, avatarIndex)
+                        }
+                    )
+                }
+
                 AppScreen.HOME -> {
                     HomeScreen(
                         userName = userName,
-                        onUserNameChange = { viewModel.updateUserName(it) },
+                        userAvatarIndex = userAvatarIndex,
+                        onProfileClick = { viewModel.openProfile() },
                         onSendClick = {
                             requestActionWithPermissionsAndSettings {
                                 viewModel.openFilePicker()
@@ -521,6 +544,7 @@ fun MainAppContent(
                         peers = peers,
                         selectedFiles = selectedFiles,
                         isScanning = isScanning,
+                        userAvatarIndex = userAvatarIndex,
                         connectingDeviceAddress = connectingDeviceAddress,
                         onBackClick = { viewModel.resetToHome() },
                         onRescanClick = { viewModel.startRadarScan() },
@@ -534,6 +558,7 @@ fun MainAppContent(
                     }
                     ReceiveScreen(
                         userName = userName,
+                        userAvatarIndex = userAvatarIndex,
                         thisDevice = thisDevice,
                         onBackClick = { viewModel.resetToHome() }
                     )

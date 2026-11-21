@@ -23,7 +23,7 @@ class ExampleRobolectricTest {
   fun readStringFromContext() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Mini Share", appName)
+    assertEquals("Big Share", appName)
   }
 
   @Test
@@ -112,7 +112,7 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val engine = com.example.transfer.FileTransferEngine(context)
     val dest = engine.getFallbackFile("../../sample.txt")
-    assertEquals("Mini Share", dest.parentFile?.name)
+    assertEquals("Big Share", dest.parentFile?.name)
     assertEquals("sample.txt", dest.name)
     assertEquals("notes", engine.sanitizeFileName("/evil/path/notes"))
   }
@@ -159,5 +159,12 @@ class ExampleRobolectricTest {
     assertEquals("Demo App_v1.2.apk", fileItem.name)
     assertEquals(2048L, fileItem.sizeBytes)
     assertEquals("application/vnd.android.package-archive", fileItem.mimeType)
+  }
+
+  @Test
+  fun testUserAvatarCatalog_hasTenDistinctPhotos() {
+    val avatars = com.example.ui.components.UserAvatarCatalog.avatars
+    assertEquals(10, avatars.size)
+    assertEquals(10, avatars.map { it.drawableRes }.toSet().size)
   }
 }

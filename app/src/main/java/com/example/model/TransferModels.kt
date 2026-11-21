@@ -11,6 +11,7 @@ enum class TransferStatus {
 }
 
 enum class AppScreen {
+    PROFILE,
     HOME,
     FILE_PICKER,
     RADAR,

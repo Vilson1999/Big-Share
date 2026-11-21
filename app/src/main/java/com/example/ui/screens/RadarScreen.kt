@@ -40,6 +40,7 @@ import com.example.model.formatBytes
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.RadarAnimation
+import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
 
 @Composable
@@ -47,6 +48,7 @@ fun RadarScreen(
     peers: List<WifiP2pDevice>,
     selectedFiles: List<FileItem>,
     isScanning: Boolean,
+    userAvatarIndex: Int = 0,
     connectingDeviceAddress: String? = null,
     onBackClick: () -> Unit,
     onRescanClick: () -> Unit,
@@ -92,12 +94,12 @@ fun RadarScreen(
                 }
             )
 
-            // Radar Console Container
+            // Radar Console Container with big user photo & waves
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 6.dp)
-                    .height(225.dp)
+                    .height(264.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(colors.surfaceVariant.copy(alpha = 0.65f))
                     .border(1.dp, colors.outline, RoundedCornerShape(24.dp)),
@@ -107,7 +109,10 @@ fun RadarScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(8.dp),
-                    radarColor = colors.primary
+                    radarColor = colors.primary,
+                    avatarDrawableRes = UserAvatarCatalog.getDrawableRes(userAvatarIndex),
+                    avatarSize = 112.dp,
+                    isActive = isScanning
                 )
 
                 // Top-left live status badge inside radar panel

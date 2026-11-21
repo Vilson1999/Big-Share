@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Mini Share"
+rootProject.name = "Big Share"
 
 include(":app")
