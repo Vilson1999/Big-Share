@@ -98,6 +98,7 @@ android {
         "META-INF/LICENSE*",
         "META-INF/NOTICE*",
         "META-INF/*.kotlin_module",
+        "META-INF/*.version",
         "**/*.kotlin_builtins",
         "**/*.kotlin_metadata",
         "DebugProbesKt.bin"

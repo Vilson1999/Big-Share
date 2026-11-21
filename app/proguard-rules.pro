@@ -1,6 +1,7 @@
 -repackageclasses 'a'
 -allowaccessmodification
 -optimizationpasses 5
+-mergeinterfacesaggressively
 
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);

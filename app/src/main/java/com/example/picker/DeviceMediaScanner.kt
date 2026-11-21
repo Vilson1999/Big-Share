@@ -10,7 +10,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.media.MediaMetadataRetriever
 import android.media.ThumbnailUtils
 import android.net.Uri
 import android.os.Build
@@ -92,14 +91,6 @@ data class PickerAppItem(
         }
 }
 
-data class ScannedDeviceFiles(
-    val images: List<PickerMediaItem> = emptyList(),
-    val videos: List<PickerMediaItem> = emptyList(),
-    val music: List<PickerMediaItem> = emptyList(),
-    val apps: List<PickerAppItem> = emptyList(),
-    val hasSdCard: Boolean = false
-)
-
 fun PickerMediaItem.toFileItem(): FileItem = FileItem(
     id = UUID.randomUUID().toString(),
     name = name,
@@ -156,59 +147,6 @@ object PickerThumbnailCache {
                         IMAGE_THUMB_PX,
                         IMAGE_THUMB_PX
                     )
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        val imageBitmap = bitmap?.asImageBitmap()
-        if (imageBitmap != null) {
-            cache.put(key, imageBitmap)
-        }
-        return imageBitmap
-    }
-
-    suspend fun loadVideoThumbnail(context: Context, uriString: String): ImageBitmap? {
-        val key = "vid:$uriString"
-        cache.get(key)?.let { return it }
-
-        val bitmap = withContext(Dispatchers.IO) {
-            try {
-                val uri = Uri.parse(uriString)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                    uri.scheme == ContentResolver.SCHEME_CONTENT
-                ) {
-                    try {
-                        return@withContext context.contentResolver.loadThumbnail(
-                            uri,
-                            Size(IMAGE_THUMB_PX, IMAGE_THUMB_PX),
-                            null
-                        )
-                    } catch (_: Exception) {
-                    }
-                }
-
-                val retriever = MediaMetadataRetriever()
-                try {
-                    if (uri.scheme == ContentResolver.SCHEME_FILE && uri.path != null) {
-                        retriever.setDataSource(uri.path)
-                    } else {
-                        retriever.setDataSource(context, uri)
-                    }
-                    val frame = retriever.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        ?: retriever.frameAtTime
-                    frame?.let {
-                        ThumbnailUtils.extractThumbnail(
-                            it,
-                            IMAGE_THUMB_PX,
-                            IMAGE_THUMB_PX
-                        )
-                    }
-                } finally {
-                    try {
-                        retriever.release()
-                    } catch (_: Exception) {}
                 }
             } catch (_: Exception) {
                 null
@@ -331,19 +269,6 @@ object DeviceMediaScanner {
                 music.sortedByDescending { it.dateModifiedSec }
             )
         }
-
-    fun detectHasSdCard(context: Context): Boolean {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val volumes = MediaStore.getExternalVolumeNames(context)
-                if (volumes.any { it != MediaStore.VOLUME_EXTERNAL_PRIMARY }) return true
-            }
-            val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
-            storageManager?.storageVolumes?.any { it.isRemovable } == true
-        } catch (_: Exception) {
-            false
-        }
-    }
 
     suspend fun scanInstalledApps(context: Context): List<PickerAppItem> = withContext(Dispatchers.IO) {
         val apks = mutableListOf<PickerAppItem>()
