@@ -1,6 +1,7 @@
 package com.example
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.example.model.FileItem
 import com.example.model.TransferStats
@@ -8,12 +9,16 @@ import com.example.model.TransferStatus
 import com.example.model.formatBytes
 import com.example.model.formatSeconds
 import com.example.picker.toFileItem
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -167,5 +172,71 @@ class ExampleRobolectricTest {
     val avatars = com.example.ui.components.UserAvatarCatalog.avatars
     assertEquals(10, avatars.size)
     assertEquals(10, avatars.map { it.drawableRes }.toSet().size)
+  }
+
+  @Test
+  @Config(sdk = [28])
+  fun testSynchronizedTransferStartAndCompletion() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val tempFile = File(context.cacheDir, "sync_test.bin").apply {
+      writeBytes(ByteArray(128 * 1024) { (it % 251).toByte() })
+    }
+    val fileItem = FileItem(
+      id = "sync-1",
+      name = "sync_test.bin",
+      sizeBytes = tempFile.length(),
+      uriString = Uri.fromFile(tempFile).toString(),
+      mimeType = "application/octet-stream"
+    )
+
+    val receiver = com.example.transfer.FileTransferEngine(context)
+    val sender = com.example.transfer.FileTransferEngine(context)
+
+    val receiverStartedAt = AtomicLong(0L)
+    val senderStartedAt = AtomicLong(0L)
+    val receiverDoneAt = AtomicLong(0L)
+    val senderDoneAt = AtomicLong(0L)
+    var senderLastProgress = 0f
+    var receiverLastProgress = 0f
+    var senderCompleted = false
+    var receiverCompleted = false
+
+    val rxJob = async {
+      receiver.receiveFiles(
+        isGroupOwner = true,
+        hostAddress = "127.0.0.1",
+        onTransferStarted = { _, _ -> receiverStartedAt.set(System.currentTimeMillis()) },
+        onProgress = { _, stats -> receiverLastProgress = stats.overallProgress },
+        onComplete = { ok, _ ->
+          receiverCompleted = ok
+          receiverDoneAt.set(System.currentTimeMillis())
+        }
+      )
+    }
+
+    val txJob = async {
+      sender.sendFiles(
+        isGroupOwner = false,
+        hostAddress = "127.0.0.1",
+        files = listOf(fileItem),
+        onTransferStarted = { _, _ -> senderStartedAt.set(System.currentTimeMillis()) },
+        onProgress = { _, stats -> senderLastProgress = stats.overallProgress },
+        onComplete = { ok, _ ->
+          senderCompleted = ok
+          senderDoneAt.set(System.currentTimeMillis())
+        }
+      )
+    }
+
+    rxJob.await()
+    txJob.await()
+    tempFile.delete()
+
+    assertTrue(senderCompleted)
+    assertTrue(receiverCompleted)
+    assertEquals(1.0f, senderLastProgress, 0.001f)
+    assertEquals(1.0f, receiverLastProgress, 0.001f)
+    assertTrue(kotlin.math.abs(senderStartedAt.get() - receiverStartedAt.get()) < 1000L)
+    assertTrue(kotlin.math.abs(senderDoneAt.get() - receiverDoneAt.get()) < 1000L)
   }
 }

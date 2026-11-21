@@ -15,7 +15,6 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.ParcelUuid
-import android.util.Log
 
 class BluetoothDiscoveryHelper(private val context: Context) {
 
@@ -58,18 +57,12 @@ class BluetoothDiscoveryHelper(private val context: Context) {
                 .addServiceUuid(MINISHARE_SERVICE_UUID)
                 .build()
 
-            val callback = object : AdvertiseCallback() {
-                override fun onStartFailure(errorCode: Int) {
-                    Log.d("BluetoothDiscovery", "BLE advertise failure: $errorCode")
-                }
-            }
+            val callback = object : AdvertiseCallback() {}
             advertiser = bleAdvertiser
             advertiseCallback = callback
             bleAdvertiser.startAdvertising(settings, data, callback)
-        } catch (e: SecurityException) {
-            Log.d("BluetoothDiscovery", "Missing Bluetooth permission for advertising")
-        } catch (e: Exception) {
-            Log.d("BluetoothDiscovery", "BLE advertise error", e)
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
         }
     }
 
@@ -112,10 +105,8 @@ class BluetoothDiscoveryHelper(private val context: Context) {
             scanner = bleScanner
             scanCallback = callback
             bleScanner.startScan(listOf(filter), settings, callback)
-        } catch (e: SecurityException) {
-            Log.d("BluetoothDiscovery", "Missing Bluetooth permission for scanning")
-        } catch (e: Exception) {
-            Log.d("BluetoothDiscovery", "BLE scan error", e)
+        } catch (_: SecurityException) {
+        } catch (_: Exception) {
         }
     }
 

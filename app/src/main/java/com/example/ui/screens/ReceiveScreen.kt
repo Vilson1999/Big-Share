@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import android.net.wifi.p2p.WifiP2pDevice
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +36,6 @@ import com.example.ui.components.atmosphericGlow
 fun ReceiveScreen(
     userName: String,
     userAvatarIndex: Int = 0,
-    thisDevice: WifiP2pDevice?,
     onBackClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme

@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.FileItem
 import com.example.model.formatBytes
 import com.example.ui.components.AppIcons
-import com.example.ui.components.AppTopBar
+import com.example.ui.components.BackIconButton
 import com.example.ui.components.RadarAnimation
 import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
@@ -57,7 +56,6 @@ fun RadarScreen(
     userAvatarIndex: Int = 0,
     connectingDeviceAddress: String? = null,
     onBackClick: () -> Unit,
-    onRescanClick: () -> Unit,
     onDeviceClick: (WifiP2pDevice) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -77,52 +75,50 @@ fun RadarScreen(
             .testTag("radar_screen")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            AppTopBar(
-                title = userName.ifBlank { "Big Share User" },
-                onBackClick = onBackClick,
-                actions = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(colors.primary.copy(alpha = 0.16f))
-                                .border(1.dp, colors.primary.copy(alpha = 0.45f), CircleShape)
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                .testTag("radar_files_summary_pill"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "$fileCountLabel • $totalFormattedSize",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primary,
-                                maxLines = 1
-                            )
-                        }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                BackIconButton(
+                    onClick = onBackClick,
+                    modifier = Modifier.align(Alignment.CenterStart)
+                )
 
-                        IconButton(
-                            onClick = onRescanClick,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(colors.surfaceVariant)
-                                .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
-                                .testTag("rescan_button")
-                        ) {
-                            Icon(
-                                imageVector = AppIcons.Refresh,
-                                contentDescription = "Rescan",
-                                tint = colors.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 56.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = userName.ifBlank { "Big Share User" },
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(colors.primary.copy(alpha = 0.16f))
+                            .border(1.dp, colors.primary.copy(alpha = 0.45f), CircleShape)
+                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                            .testTag("radar_files_summary_pill"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$fileCountLabel • $totalFormattedSize",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary,
+                            maxLines = 1
+                        )
                     }
                 }
-            )
+            }
 
             // Radar Console Container with big user photo & waves
             Box(

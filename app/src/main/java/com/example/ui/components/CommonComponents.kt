@@ -98,6 +98,31 @@ fun Modifier.atmosphericGlow(
 }
 
 @Composable
+fun BackIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surfaceVariant)
+            .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .testTag("top_bar_back_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = AppIcons.ArrowBack,
+            contentDescription = "Back",
+            tint = colors.onSurface,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
 fun AppTopBar(
     title: String,
     subtitle: String? = null,
@@ -118,23 +143,7 @@ fun AppTopBar(
             modifier = Modifier.weight(1f)
         ) {
             if (onBackClick != null) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(colors.surfaceVariant)
-                        .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
-                        .clickable { onBackClick() }
-                        .testTag("top_bar_back_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = AppIcons.ArrowBack,
-                        contentDescription = "Back",
-                        tint = colors.onSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                BackIconButton(onClick = onBackClick)
                 Spacer(modifier = Modifier.width(12.dp))
             }
             Column {

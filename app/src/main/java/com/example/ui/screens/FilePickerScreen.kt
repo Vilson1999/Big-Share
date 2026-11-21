@@ -115,7 +115,6 @@ fun FilePickerScreen(
     hasMediaPermission: Boolean,
     onEnsureLoaded: () -> Unit,
     onMediaPermissionResult: () -> Unit,
-    onRefreshApks: () -> Unit,
     onBackClick: () -> Unit,
     onSystemBrowseClick: () -> Unit,
     onExternalPermissionLaunch: () -> Unit,
@@ -134,24 +133,6 @@ fun FilePickerScreen(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
         onMediaPermissionResult()
-    }
-
-    val apkFolderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { treeUri ->
-        if (treeUri != null) {
-            DeviceMediaScanner.saveSafTreeUri(context, treeUri)
-            onRefreshApks()
-        }
-    }
-
-    val apkFilesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            DeviceMediaScanner.saveSafApkUris(context, uris)
-            onRefreshApks()
-        }
     }
 
     // Ensure preload is active and request storage permissions once if not already granted
@@ -277,25 +258,21 @@ fun FilePickerScreen(
             ) {
                 when (activeCategory) {
                     PickerCategory.IMAGE -> {
-                        if (!hasMediaPermission) {
-                            MediaPermissionPrompt(
-                                categoryLabel = "Images",
-                                onGrantClick = {
-                                    onExternalPermissionLaunch()
-                                    mediaPermissionLauncher.launch(getMediaScanPermissions())
-                                },
-                                onBrowseClick = onSystemBrowseClick
-                            )
-                        } else if (isScanningMedia && images.isEmpty()) {
-                            ScanningIndicator("Scanning images...")
-                        } else if (images.isEmpty()) {
-                            EmptyPickerState(
-                                icon = AppIcons.Image,
-                                title = "No images found",
-                                subtitle = "Use Browse in the top right to pick files manually."
-                            )
-                        } else {
-                            // 1. Image Grid View (4 columns), 250px x 250px thumbnails
+                        MediaCategoryBody(
+                            categoryLabel = "Images",
+                            items = images,
+                            hasMediaPermission = hasMediaPermission,
+                            isScanningMedia = isScanningMedia,
+                            scanningText = "Scanning images...",
+                            emptyIcon = AppIcons.Image,
+                            emptyTitle = "No images found",
+                            emptySubtitle = "Use Browse in the top right to pick files manually.",
+                            onGrantClick = {
+                                onExternalPermissionLaunch()
+                                mediaPermissionLauncher.launch(getMediaScanPermissions())
+                            },
+                            onBrowseClick = onSystemBrowseClick
+                        ) {
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(4),
                                 modifier = Modifier
@@ -316,11 +293,7 @@ fun FilePickerScreen(
                                         item = item,
                                         isSelected = isItemSelected,
                                         onClick = {
-                                            if (isItemSelected) {
-                                                selectedMedia.remove(item.id)
-                                            } else {
-                                                selectedMedia[item.id] = item
-                                            }
+                                            if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
                                         }
                                     )
                                 }
@@ -329,25 +302,21 @@ fun FilePickerScreen(
                     }
 
                     PickerCategory.VIDEO -> {
-                        if (!hasMediaPermission) {
-                            MediaPermissionPrompt(
-                                categoryLabel = "Videos",
-                                onGrantClick = {
-                                    onExternalPermissionLaunch()
-                                    mediaPermissionLauncher.launch(getMediaScanPermissions())
-                                },
-                                onBrowseClick = onSystemBrowseClick
-                            )
-                        } else if (isScanningMedia && videos.isEmpty()) {
-                            ScanningIndicator("Scanning videos...")
-                        } else if (videos.isEmpty()) {
-                            EmptyPickerState(
-                                icon = AppIcons.Movie,
-                                title = "No videos found",
-                                subtitle = "Use Browse in the top right to pick videos manually."
-                            )
-                        } else {
-                            // 2. Video List View
+                        MediaCategoryBody(
+                            categoryLabel = "Videos",
+                            items = videos,
+                            hasMediaPermission = hasMediaPermission,
+                            isScanningMedia = isScanningMedia,
+                            scanningText = "Scanning videos...",
+                            emptyIcon = AppIcons.Movie,
+                            emptyTitle = "No videos found",
+                            emptySubtitle = "Use Browse in the top right to pick videos manually.",
+                            onGrantClick = {
+                                onExternalPermissionLaunch()
+                                mediaPermissionLauncher.launch(getMediaScanPermissions())
+                            },
+                            onBrowseClick = onSystemBrowseClick
+                        ) {
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -362,15 +331,14 @@ fun FilePickerScreen(
                             ) {
                                 items(videos, key = { it.id }) { item ->
                                     val isItemSelected = selectedMedia.containsKey(item.id)
-                                    VideoListRow(
+                                    MediaListRow(
                                         item = item,
+                                        icon = AppIcons.Movie,
+                                        accentColor = colors.primary,
+                                        showArtist = false,
                                         isSelected = isItemSelected,
                                         onClick = {
-                                            if (isItemSelected) {
-                                                selectedMedia.remove(item.id)
-                                            } else {
-                                                selectedMedia[item.id] = item
-                                            }
+                                            if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
                                         }
                                     )
                                 }
@@ -379,25 +347,21 @@ fun FilePickerScreen(
                     }
 
                     PickerCategory.MUSIC -> {
-                        if (!hasMediaPermission) {
-                            MediaPermissionPrompt(
-                                categoryLabel = "Music",
-                                onGrantClick = {
-                                    onExternalPermissionLaunch()
-                                    mediaPermissionLauncher.launch(getMediaScanPermissions())
-                                },
-                                onBrowseClick = onSystemBrowseClick
-                            )
-                        } else if (isScanningMedia && music.isEmpty()) {
-                            ScanningIndicator("Scanning audio...")
-                        } else if (music.isEmpty()) {
-                            EmptyPickerState(
-                                icon = AppIcons.MusicNote,
-                                title = "No audio tracks found",
-                                subtitle = "Use Browse in the top right to pick audio files manually."
-                            )
-                        } else {
-                            // 3. Music List View
+                        MediaCategoryBody(
+                            categoryLabel = "Music",
+                            items = music,
+                            hasMediaPermission = hasMediaPermission,
+                            isScanningMedia = isScanningMedia,
+                            scanningText = "Scanning audio...",
+                            emptyIcon = AppIcons.MusicNote,
+                            emptyTitle = "No audio tracks found",
+                            emptySubtitle = "Use Browse in the top right to pick audio files manually.",
+                            onGrantClick = {
+                                onExternalPermissionLaunch()
+                                mediaPermissionLauncher.launch(getMediaScanPermissions())
+                            },
+                            onBrowseClick = onSystemBrowseClick
+                        ) {
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -412,15 +376,14 @@ fun FilePickerScreen(
                             ) {
                                 items(music, key = { it.id }) { item ->
                                     val isItemSelected = selectedMedia.containsKey(item.id)
-                                    MusicListRow(
+                                    MediaListRow(
                                         item = item,
+                                        icon = AppIcons.MusicNote,
+                                        accentColor = colors.secondary,
+                                        showArtist = true,
                                         isSelected = isItemSelected,
                                         onClick = {
-                                            if (isItemSelected) {
-                                                selectedMedia.remove(item.id)
-                                            } else {
-                                                selectedMedia[item.id] = item
-                                            }
+                                            if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
                                         }
                                     )
                                 }
@@ -429,175 +392,95 @@ fun FilePickerScreen(
                     }
 
                     PickerCategory.APPS -> {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            // Quick APK folder / file action bar for Scoped Storage (Android 11+)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Row(
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            val hasAnyApps = installedApps.isNotEmpty() || apkFiles.isNotEmpty()
+                            if (isScanningApps && !hasAnyApps) {
+                                ScanningIndicator("Loading apps & APKs...")
+                            } else if (!hasAnyApps) {
+                                EmptyPickerState(
+                                    icon = AppIcons.Apps,
+                                    title = "No apps or APKs found",
+                                    subtitle = "Use Browse in the top right to pick APK files manually."
+                                )
+                            } else {
+                                // 4. Apps Grid View (5 columns): Installed apps first, then all .apk apps below
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(5),
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 44.dp)
-                                        .clip(CircleShape)
-                                        .background(EmeraldLight.copy(alpha = 0.18f))
-                                        .border(1.dp, EmeraldGreen.copy(alpha = 0.65f), CircleShape)
-                                        .clickable {
-                                            onExternalPermissionLaunch()
-                                            apkFolderLauncher.launch(
-                                                android.net.Uri.parse(
-                                                    "content://com.android.externalstorage.documents/document/primary%3ADownload"
-                                                )
-                                            )
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        .testTag("scan_apk_folder_button"),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                                        .fillMaxSize()
+                                        .testTag("picker_apps_grid"),
+                                    contentPadding = PaddingValues(
+                                        start = 12.dp,
+                                        end = 12.dp,
+                                        top = 6.dp,
+                                        bottom = if (totalSelectedCount > 0) 96.dp else 16.dp
+                                    ),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = AppIcons.FolderOpen,
-                                        contentDescription = "Scan APK Folder",
-                                        tint = EmeraldGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Scan APK Folder",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.onSurface,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 44.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.surfaceVariant)
-                                        .border(1.dp, colors.outline, CircleShape)
-                                        .clickable {
-                                            onExternalPermissionLaunch()
-                                            apkFilesLauncher.launch(
-                                                arrayOf("application/vnd.android.package-archive", "*/*")
-                                            )
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                                        .testTag("pick_apk_file_button"),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = AppIcons.Apps,
-                                        contentDescription = "Add .apk File",
-                                        tint = EmeraldGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Add .apk File",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.onSurface,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-
-                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                val hasAnyApps = installedApps.isNotEmpty() || apkFiles.isNotEmpty()
-                                if (isScanningApps && !hasAnyApps) {
-                                    ScanningIndicator("Loading apps & APKs...")
-                                } else if (!hasAnyApps) {
-                                    EmptyPickerState(
-                                        icon = AppIcons.Apps,
-                                        title = "No apps or APKs found",
-                                        subtitle = "Tap Scan APK Folder to load .apk files from Downloads."
-                                    )
-                                } else {
-                                    // 4. Apps Grid View (5 columns): Installed apps first, then all .apk apps below
-                                    LazyVerticalGrid(
-                                        columns = GridCells.Fixed(5),
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .testTag("picker_apps_grid"),
-                                        contentPadding = PaddingValues(
-                                            start = 12.dp,
-                                            end = 12.dp,
-                                            top = 6.dp,
-                                            bottom = if (totalSelectedCount > 0) 96.dp else 16.dp
-                                        ),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        items(installedApps, key = { it.id }) { app ->
-                                            val isAppSelected = selectedApps.containsKey(app.id)
-                                            AppGridCell(
-                                                app = app,
-                                                isSelected = isAppSelected,
-                                                onClick = {
-                                                    if (isAppSelected) {
-                                                        selectedApps.remove(app.id)
-                                                    } else {
-                                                        selectedApps[app.id] = app
-                                                    }
+                                    items(installedApps, key = { it.id }) { app ->
+                                        val isAppSelected = selectedApps.containsKey(app.id)
+                                        AppGridCell(
+                                            app = app,
+                                            isSelected = isAppSelected,
+                                            onClick = {
+                                                if (isAppSelected) {
+                                                    selectedApps.remove(app.id)
+                                                } else {
+                                                    selectedApps[app.id] = app
                                                 }
-                                            )
-                                        }
+                                            }
+                                        )
+                                    }
 
-                                        if (apkFiles.isNotEmpty()) {
-                                            item(
-                                                key = "apk_section_header",
-                                                span = { GridItemSpan(maxLineSpan) }
+                                    if (apkFiles.isNotEmpty()) {
+                                        item(
+                                            key = "apk_section_header",
+                                            span = { GridItemSpan(maxLineSpan) }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 6.dp, bottom = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
-                                                Row(
+                                                Box(
                                                     modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(top = 6.dp, bottom = 2.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                        .clip(CircleShape)
+                                                        .background(EmeraldLight.copy(alpha = 0.25f))
+                                                        .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), CircleShape)
+                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(CircleShape)
-                                                            .background(EmeraldLight.copy(alpha = 0.25f))
-                                                            .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), CircleShape)
-                                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "APK FILES (${apkFiles.size})",
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = colors.onSurface
-                                                        )
-                                                    }
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .weight(1f)
-                                                            .height(1.dp)
-                                                            .background(colors.outline.copy(alpha = 0.5f))
+                                                    Text(
+                                                        text = "APK FILES (${apkFiles.size})",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = colors.onSurface
                                                     )
                                                 }
-                                            }
-
-                                            items(apkFiles, key = { it.id }) { apk ->
-                                                val isApkSelected = selectedApps.containsKey(apk.id)
-                                                AppGridCell(
-                                                    app = apk,
-                                                    isSelected = isApkSelected,
-                                                    onClick = {
-                                                        if (isApkSelected) {
-                                                            selectedApps.remove(apk.id)
-                                                        } else {
-                                                            selectedApps[apk.id] = apk
-                                                        }
-                                                    }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(1.dp)
+                                                        .background(colors.outline.copy(alpha = 0.5f))
                                                 )
                                             }
+                                        }
+
+                                        items(apkFiles, key = { it.id }) { apk ->
+                                            val isApkSelected = selectedApps.containsKey(apk.id)
+                                            AppGridCell(
+                                                app = apk,
+                                                isSelected = isApkSelected,
+                                                onClick = {
+                                                    if (isApkSelected) {
+                                                        selectedApps.remove(apk.id)
+                                                    } else {
+                                                        selectedApps[apk.id] = apk
+                                                    }
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -824,84 +707,41 @@ private fun ImageGridCell(
 }
 
 @Composable
-private fun VideoListRow(
-    item: PickerMediaItem,
-    isSelected: Boolean,
-    onClick: () -> Unit
+private fun MediaCategoryBody(
+    categoryLabel: String,
+    items: List<PickerMediaItem>,
+    hasMediaPermission: Boolean,
+    isScanningMedia: Boolean,
+    scanningText: String,
+    emptyIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    emptyTitle: String,
+    emptySubtitle: String,
+    onGrantClick: () -> Unit,
+    onBrowseClick: () -> Unit,
+    content: @Composable () -> Unit
 ) {
-    val colors = MaterialTheme.colorScheme
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) colors.primary.copy(alpha = 0.12f) else colors.surfaceVariant)
-            .border(
-                width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) colors.primary else colors.outline,
-                shape = RoundedCornerShape(16.dp)
-            )
-            .clickable { onClick() }
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.primary.copy(alpha = 0.14f))
-                .border(1.dp, colors.primary.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = AppIcons.Movie,
-                contentDescription = null,
-                tint = colors.primary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.name,
-                style = MaterialTheme.typography.titleMedium,
-                fontSize = 14.sp,
-                color = colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.durationMs > 0L) {
-                    Text(
-                        text = formatSeconds(item.durationMs / 1000L),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.primary
-                    )
-                    Text(
-                        text = " • ",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.outlineVariant
-                    )
-                }
-                Text(
-                    text = formatBytes(item.sizeBytes),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-        SelectionDot(selected = isSelected)
+    when {
+        !hasMediaPermission -> MediaPermissionPrompt(
+            categoryLabel = categoryLabel,
+            onGrantClick = onGrantClick,
+            onBrowseClick = onBrowseClick
+        )
+        isScanningMedia && items.isEmpty() -> ScanningIndicator(scanningText)
+        items.isEmpty() -> EmptyPickerState(
+            icon = emptyIcon,
+            title = emptyTitle,
+            subtitle = emptySubtitle
+        )
+        else -> content()
     }
 }
 
 @Composable
-private fun MusicListRow(
+private fun MediaListRow(
     item: PickerMediaItem,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    accentColor: Color,
+    showArtist: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
@@ -911,10 +751,10 @@ private fun MusicListRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) colors.secondary.copy(alpha = 0.14f) else colors.surfaceVariant)
+            .background(if (isSelected) accentColor.copy(alpha = 0.14f) else colors.surfaceVariant)
             .border(
                 width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) colors.secondary else colors.outline,
+                color = if (isSelected) accentColor else colors.outline,
                 shape = RoundedCornerShape(16.dp)
             )
             .clickable { onClick() }
@@ -925,14 +765,14 @@ private fun MusicListRow(
             modifier = Modifier
                 .size(46.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(colors.secondary.copy(alpha = 0.16f))
-                .border(1.dp, colors.secondary.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                .background(accentColor.copy(alpha = 0.15f))
+                .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = AppIcons.MusicNote,
+                imageVector = icon,
                 contentDescription = null,
-                tint = colors.secondary,
+                tint = accentColor,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -950,7 +790,7 @@ private fun MusicListRow(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.artist.isNotBlank()) {
+                if (showArtist && item.artist.isNotBlank()) {
                     Text(
                         text = item.artist,
                         style = MaterialTheme.typography.bodyMedium,
@@ -970,7 +810,7 @@ private fun MusicListRow(
                     Text(
                         text = formatSeconds(item.durationMs / 1000L),
                         style = MaterialTheme.typography.labelSmall,
-                        color = colors.secondary
+                        color = accentColor
                     )
                     Text(
                         text = " • ",
@@ -989,7 +829,7 @@ private fun MusicListRow(
         Spacer(modifier = Modifier.width(8.dp))
         SelectionDot(
             selected = isSelected,
-            activeColor = colors.secondary
+            activeColor = accentColor
         )
     }
 }

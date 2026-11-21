@@ -16,9 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
-import android.provider.DocumentsContract
 import android.provider.MediaStore
-import android.provider.OpenableColumns
 import android.util.LruCache
 import android.util.Size
 import androidx.compose.ui.graphics.ImageBitmap
@@ -38,11 +36,6 @@ enum class PickerCategory(val label: String) {
     APPS("Apps")
 }
 
-enum class StorageLocation(val label: String) {
-    INTERNAL("Internal"),
-    SD_CARD("SD Card")
-}
-
 data class PickerMediaItem(
     val id: String,
     val name: String,
@@ -52,7 +45,6 @@ data class PickerMediaItem(
     val durationMs: Long = 0L,
     val artist: String = "",
     val dateModifiedSec: Long = 0L,
-    val storageLocation: StorageLocation = StorageLocation.INTERNAL,
     val category: PickerCategory
 )
 
@@ -115,7 +107,7 @@ fun PickerAppItem.toFileItem(): FileItem = FileItem(
 
 object PickerThumbnailCache {
     private const val IMAGE_THUMB_PX = 250
-    private val cache = object : LruCache<String, ImageBitmap>(180) {}
+    private val cache = object : LruCache<String, ImageBitmap>(120) {}
 
     fun getCached(key: String): ImageBitmap? = cache.get(key)
 
@@ -293,18 +285,6 @@ object DeviceMediaScanner {
         }
     }
 
-    suspend fun scanMediaFiles(context: Context): Triple<List<PickerMediaItem>, List<PickerMediaItem>, List<PickerMediaItem>> {
-        var result = Triple<List<PickerMediaItem>, List<PickerMediaItem>, List<PickerMediaItem>>(
-            emptyList(),
-            emptyList(),
-            emptyList()
-        )
-        scanMediaFilesProgressively(context) { imgs, vids, auds ->
-            result = Triple(imgs, vids, auds)
-        }
-        return result
-    }
-
     suspend fun scanMediaFilesProgressively(
         context: Context,
         onBatch: (images: List<PickerMediaItem>, videos: List<PickerMediaItem>, music: List<PickerMediaItem>) -> Unit
@@ -319,7 +299,7 @@ object DeviceMediaScanner {
         var totalEmittedCount = 0
         var lastEmitAt = 0L
 
-        fun emitSnapshot(force: Boolean = false, sortAll: Boolean = false) {
+        fun emitSnapshot(force: Boolean = false) {
             val totalNow = images.size + videos.size + music.size
             val now = System.currentTimeMillis()
             val delta = totalNow - totalEmittedCount
@@ -331,87 +311,37 @@ object DeviceMediaScanner {
 
             totalEmittedCount = totalNow
             lastEmitAt = now
-            val imgSnap = if (sortAll) images.sortedByDescending { it.dateModifiedSec } else images.toList()
-            val vidSnap = if (sortAll) videos.sortedByDescending { it.dateModifiedSec } else videos.toList()
-            val musSnap = if (sortAll) music.sortedByDescending { it.dateModifiedSec } else music.toList()
-            onBatch(imgSnap, vidSnap, musSnap)
+            onBatch(images.toList(), videos.toList(), music.toList())
         }
 
         val volumes = getMediaStoreVolumes(context)
         for (volume in volumes) {
-            queryImagesFromVolume(context, volume, images, seenPaths, seenSignature) {
+            queryMediaFromVolume(context, volume, PickerCategory.IMAGE, images, seenPaths, seenSignature) {
                 emitSnapshot(force = false)
             }
             emitSnapshot(force = true)
 
-            queryVideosFromVolume(context, volume, videos, seenPaths, seenSignature) {
+            queryMediaFromVolume(context, volume, PickerCategory.VIDEO, videos, seenPaths, seenSignature) {
                 emitSnapshot(force = false)
             }
             emitSnapshot(force = true)
 
-            queryAudioFromVolume(context, volume, music, seenPaths, seenSignature) {
+            queryMediaFromVolume(context, volume, PickerCategory.MUSIC, music, seenPaths, seenSignature) {
                 emitSnapshot(force = false)
             }
             emitSnapshot(force = true)
         }
 
-        val countBeforeFallback = images.size + videos.size + music.size
         // Supplementary scan across Internal + SD Card directories for unindexed files
         scanStorageRootsFallback(context, images, videos, music, seenPaths, seenSignature) {
             emitSnapshot(force = false)
         }
 
-        val fallbackAdded = (images.size + videos.size + music.size) > countBeforeFallback
         onBatch(
             images.sortedByDescending { it.dateModifiedSec },
             videos.sortedByDescending { it.dateModifiedSec },
             music.sortedByDescending { it.dateModifiedSec }
         )
-        if (!fallbackAdded && totalEmittedCount == 0) {
-            // Empty device case still already delivered empty snapshots above
-        }
-    }
-
-    fun saveSafTreeUri(context: Context, treeUri: Uri) {
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                treeUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        } catch (_: Exception) {
-        }
-        val prefs = context.getSharedPreferences(APK_SAF_PREFS, Context.MODE_PRIVATE)
-        val existing = prefs.getStringSet(KEY_TREE_URIS, emptySet())?.toMutableSet() ?: mutableSetOf()
-        existing.add(treeUri.toString())
-        prefs.edit().putStringSet(KEY_TREE_URIS, existing).apply()
-    }
-
-    fun saveSafApkUris(context: Context, uris: List<Uri>) {
-        val prefs = context.getSharedPreferences(APK_SAF_PREFS, Context.MODE_PRIVATE)
-        val existing = prefs.getStringSet(KEY_FILE_URIS, emptySet())?.toMutableSet() ?: mutableSetOf()
-        for (uri in uris) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {
-            }
-            existing.add(uri.toString())
-        }
-        prefs.edit().putStringSet(KEY_FILE_URIS, existing).apply()
-    }
-
-    private const val APK_SAF_PREFS = "apk_saf_prefs"
-    private const val KEY_TREE_URIS = "apk_tree_uris"
-    private const val KEY_FILE_URIS = "apk_file_uris"
-
-    suspend fun scanInstalledApps(context: Context): List<PickerAppItem> {
-        var combined: List<PickerAppItem> = emptyList()
-        scanAppsAndApksProgressively(context) { installed, apks ->
-            combined = installed + apks
-        }
-        return combined
     }
 
     suspend fun scanAppsAndApksProgressively(
@@ -497,12 +427,7 @@ object DeviceMediaScanner {
         }
         emitSnapshot(force = true, sortLists = true)
 
-        // 2. Scan persisted SAF APK files/folders and MediaStore APKs (shown below installed apps)
-        scanPersistedSafApks(context, apks, seenApkSig) {
-            emitSnapshot(force = false)
-        }
-        emitSnapshot(force = true)
-
+        // 2. Auto-scan MediaStore Downloads & Files across all storage volumes (shown below installed apps)
         for (volume in getMediaStoreVolumes(context)) {
             queryApksFromVolume(context, volume, apks, seenApkPaths, seenApkSig) {
                 emitSnapshot(force = false)
@@ -510,7 +435,7 @@ object DeviceMediaScanner {
             emitSnapshot(force = true)
         }
 
-        // 3. Scan Downloads / Documents / storage directories for remaining .apk files
+        // 3. Auto-scan all accessible folders across internal storage and SD cards for .apk files
         scanApkStorageRootsFallback(context, apks, seenApkPaths, seenApkSig) {
             emitSnapshot(force = false)
         }
@@ -627,128 +552,6 @@ object DeviceMediaScanner {
         }
     }
 
-    private fun scanPersistedSafApks(
-        context: Context,
-        out: MutableList<PickerAppItem>,
-        seenSig: MutableSet<String>,
-        onItemAdded: () -> Unit = {}
-    ) {
-        val prefs = context.getSharedPreferences(APK_SAF_PREFS, Context.MODE_PRIVATE)
-        val treeUris = prefs.getStringSet(KEY_TREE_URIS, emptySet()).orEmpty()
-        for (treeUriStr in treeUris) {
-            try {
-                val treeUri = Uri.parse(treeUriStr)
-                val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-                walkSafTreeForApks(context, treeUri, rootDocId, 0, out, seenSig, onItemAdded)
-            } catch (_: Exception) {
-            }
-        }
-
-        val fileUris = prefs.getStringSet(KEY_FILE_URIS, emptySet()).orEmpty()
-        for (uriStr in fileUris) {
-            try {
-                val uri = Uri.parse(uriStr)
-                context.contentResolver.query(
-                    uri,
-                    arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
-                    null,
-                    null,
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                        val name = if (nameIdx != -1) cursor.getString(nameIdx) else null
-                        val size = if (sizeIdx != -1) cursor.getLong(sizeIdx) else 0L
-                        if (!name.isNullOrBlank() && name.endsWith(".apk", ignoreCase = true) && size > 0L) {
-                            val sig = "apk:${name.lowercase()}_${size}"
-                            if (seenSig.add(sig)) {
-                                out.add(
-                                    PickerAppItem(
-                                        id = "apksaf:$uriStr",
-                                        packageName = "",
-                                        appName = name,
-                                        versionName = "",
-                                        apkPath = "",
-                                        uriString = uriStr,
-                                        sizeBytes = size,
-                                        isStandaloneApk = true,
-                                        fileNameOverride = name
-                                    )
-                                )
-                                onItemAdded()
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun walkSafTreeForApks(
-        context: Context,
-        treeUri: Uri,
-        parentDocId: String,
-        depth: Int,
-        out: MutableList<PickerAppItem>,
-        seenSig: MutableSet<String>,
-        onItemAdded: () -> Unit = {}
-    ) {
-        if (depth > 4) return
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE,
-            DocumentsContract.Document.COLUMN_SIZE
-        )
-        try {
-            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
-
-                while (cursor.moveToNext()) {
-                    val docId = if (idCol != -1) cursor.getString(idCol) else continue
-                    val name = if (nameCol != -1) cursor.getString(nameCol) ?: "" else ""
-                    val mime = if (mimeCol != -1) cursor.getString(mimeCol) ?: "" else ""
-                    val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
-
-                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                        if (!name.startsWith(".")) {
-                            walkSafTreeForApks(context, treeUri, docId, depth + 1, out, seenSig, onItemAdded)
-                        }
-                    } else if (size > 0L && (name.endsWith(".apk", ignoreCase = true) ||
-                            mime.equals("application/vnd.android.package-archive", ignoreCase = true))
-                    ) {
-                        val fileName = if (name.endsWith(".apk", ignoreCase = true)) name else "$name.apk"
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                        val sig = "apk:${fileName.lowercase()}_${size}"
-                        if (seenSig.add(sig)) {
-                            out.add(
-                                PickerAppItem(
-                                    id = "apksaf:$docUri",
-                                    packageName = "",
-                                    appName = fileName,
-                                    versionName = "",
-                                    apkPath = "",
-                                    uriString = docUri.toString(),
-                                    sizeBytes = size,
-                                    isStandaloneApk = true,
-                                    fileNameOverride = fileName
-                                )
-                            )
-                            onItemAdded()
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-    }
-
     private fun scanApkStorageRootsFallback(
         context: Context,
         out: MutableList<PickerAppItem>,
@@ -776,9 +579,9 @@ object DeviceMediaScanner {
             }
         } catch (_: Exception) {}
 
-        val commonApkSubdirs = listOf("Download", "Downloads", "APKs", "Apk", "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp")
+        val commonApkSubdirs = listOf("Download", "Downloads", "APKs", "Apk", "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp", "Android/media")
         val roots = collectStorageRoots(context)
-        for ((rootDir, _) in roots) {
+        for (rootDir in roots) {
             for (sub in commonApkSubdirs) {
                 val candidate = File(rootDir, sub)
                 if (candidate.exists() && candidate.isDirectory && candidate.canRead()) {
@@ -791,7 +594,7 @@ object DeviceMediaScanner {
         for (dir in priorityDirs.values) {
             walkApkDirectory(context, dir, 0, out, seenPaths, seenSig, visitedDirs, onItemAdded)
         }
-        for ((rootDir, _) in roots) {
+        for (rootDir in roots) {
             walkApkDirectory(context, rootDir, 0, out, seenPaths, seenSig, visitedDirs, onItemAdded)
         }
     }
@@ -806,14 +609,17 @@ object DeviceMediaScanner {
         visitedDirs: MutableSet<String>,
         onItemAdded: () -> Unit = {}
     ) {
-        if (depth > 4) return
+        if (depth > 8) return
         if (!visitedDirs.add(dir.absolutePath)) return
         val children = dir.listFiles() ?: return
+        val isAndroidDir = dir.name.equals("Android", ignoreCase = true)
         for (file in children) {
             val name = file.name
             if (name.startsWith(".")) continue
             if (file.isDirectory) {
-                if (name.equals("Android", ignoreCase = true) && depth <= 1) continue
+                if (isAndroidDir && (name.equals("data", ignoreCase = true) || name.equals("obb", ignoreCase = true))) {
+                    continue
+                }
                 walkApkDirectory(context, file, depth + 1, out, seenPaths, seenSig, visitedDirs, onItemAdded)
             } else if (file.isFile && file.canRead() && file.length() > 0L && name.endsWith(".apk", ignoreCase = true)) {
                 val absPath = file.absolutePath
@@ -876,230 +682,127 @@ object DeviceMediaScanner {
         }
     }
 
-    private fun resolveStorageLocation(volume: String, filePath: String?): StorageLocation {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (volume != MediaStore.VOLUME_EXTERNAL_PRIMARY && volume != "external") {
-                return StorageLocation.SD_CARD
-            }
-        }
-        if (!filePath.isNullOrBlank()) {
-            val lower = filePath.lowercase()
-            if (lower.startsWith("/storage/") && !lower.startsWith("/storage/emulated/")) {
-                return StorageLocation.SD_CARD
-            }
-        }
-        return StorageLocation.INTERNAL
-    }
-
     private val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif")
     private val videoExts = setOf("mp4", "mkv", "mov", "avi", "webm", "3gp", "m4v", "ts")
     private val audioExts = setOf("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "wma")
 
-    private fun queryImagesFromVolume(
+    private fun queryMediaFromVolume(
         context: Context,
         volume: String,
+        category: PickerCategory,
         out: MutableList<PickerMediaItem>,
         seenPaths: MutableSet<String>,
         seenSig: MutableSet<String>,
         onItemAdded: () -> Unit = {}
     ) {
-        val collection = MediaStore.Images.Media.getContentUri(volume)
-        val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.SIZE,
-            MediaStore.Images.Media.MIME_TYPE,
-            MediaStore.Images.Media.DATE_MODIFIED,
-            MediaStore.Images.Media.DATA
-        )
+        val collection = when (category) {
+            PickerCategory.IMAGE -> MediaStore.Images.Media.getContentUri(volume)
+            PickerCategory.VIDEO -> MediaStore.Video.Media.getContentUri(volume)
+            PickerCategory.MUSIC -> MediaStore.Audio.Media.getContentUri(volume)
+            PickerCategory.APPS -> return
+        }
+        val projection = when (category) {
+            PickerCategory.IMAGE -> arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATA
+            )
+            PickerCategory.VIDEO -> arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATA,
+                MediaStore.Video.Media.DURATION
+            )
+            PickerCategory.MUSIC -> arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATA,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST
+            )
+            PickerCategory.APPS -> return
+        }
+        val prefix = when (category) {
+            PickerCategory.IMAGE -> "img"
+            PickerCategory.VIDEO -> "vid"
+            PickerCategory.MUSIC -> "aud"
+            PickerCategory.APPS -> ""
+        }
+        val defaultExt = when (category) {
+            PickerCategory.IMAGE -> "jpg"
+            PickerCategory.VIDEO -> "mp4"
+            PickerCategory.MUSIC -> "mp3"
+            PickerCategory.APPS -> ""
+        }
+        val defaultMime = when (category) {
+            PickerCategory.IMAGE -> "image/*"
+            PickerCategory.VIDEO -> "video/*"
+            PickerCategory.MUSIC -> "audio/*"
+            PickerCategory.APPS -> "*/*"
+        }
+
         try {
             context.contentResolver.query(
                 collection,
                 projection,
-                "${MediaStore.Images.Media.SIZE} > 0",
+                "${MediaStore.MediaColumns.SIZE} > 0",
                 null,
-                "${MediaStore.Images.Media.DATE_MODIFIED} DESC"
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
             )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-                val nameCol = cursor.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
-                val sizeCol = cursor.getColumnIndex(MediaStore.Images.Media.SIZE)
-                val mimeCol = cursor.getColumnIndex(MediaStore.Images.Media.MIME_TYPE)
-                val modCol = cursor.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
-                val dataCol = cursor.getColumnIndex(MediaStore.Images.Media.DATA)
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                val sizeCol = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                val mimeCol = cursor.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE)
+                val modCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                val durCol = if (category != PickerCategory.IMAGE) {
+                    cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+                } else -1
+                val titleCol = if (category == PickerCategory.MUSIC) {
+                    cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
+                } else -1
+                val artistCol = if (category == PickerCategory.MUSIC) {
+                    cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+                } else -1
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
-                    val name = if (nameCol != -1) cursor.getString(nameCol) ?: "image_$id.jpg" else "image_$id.jpg"
                     val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
                     if (size <= 0L) continue
-                    val mime = if (mimeCol != -1) cursor.getString(mimeCol) ?: "image/*" else "image/*"
-                    val mod = if (modCol != -1) cursor.getLong(modCol) else 0L
-                    val dataPath = if (dataCol != -1) cursor.getString(dataCol) else null
-
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    val storage = resolveStorageLocation(volume, dataPath)
-                    if (!dataPath.isNullOrBlank()) seenPaths.add(dataPath)
-                    val sig = "img:${name}_${size}"
-                    if (seenSig.add(sig)) {
-                        out.add(
-                            PickerMediaItem(
-                                id = "img:$volume:$id",
-                                name = name,
-                                sizeBytes = size,
-                                uriString = uri.toString(),
-                                mimeType = mime,
-                                dateModifiedSec = mod,
-                                storageLocation = storage,
-                                category = PickerCategory.IMAGE
-                            )
-                        )
-                        onItemAdded()
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun queryVideosFromVolume(
-        context: Context,
-        volume: String,
-        out: MutableList<PickerMediaItem>,
-        seenPaths: MutableSet<String>,
-        seenSig: MutableSet<String>,
-        onItemAdded: () -> Unit = {}
-    ) {
-        val collection = MediaStore.Video.Media.getContentUri(volume)
-        val projection = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.SIZE,
-            MediaStore.Video.Media.MIME_TYPE,
-            MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.DATE_MODIFIED,
-            MediaStore.Video.Media.DATA
-        )
-        try {
-            context.contentResolver.query(
-                collection,
-                projection,
-                "${MediaStore.Video.Media.SIZE} > 0",
-                null,
-                "${MediaStore.Video.Media.DATE_MODIFIED} DESC"
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val nameCol = cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME)
-                val sizeCol = cursor.getColumnIndex(MediaStore.Video.Media.SIZE)
-                val mimeCol = cursor.getColumnIndex(MediaStore.Video.Media.MIME_TYPE)
-                val durCol = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
-                val modCol = cursor.getColumnIndex(MediaStore.Video.Media.DATE_MODIFIED)
-                val dataCol = cursor.getColumnIndex(MediaStore.Video.Media.DATA)
-
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
-                    val name = if (nameCol != -1) cursor.getString(nameCol) ?: "video_$id.mp4" else "video_$id.mp4"
-                    val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
-                    if (size <= 0L) continue
-                    val mime = if (mimeCol != -1) cursor.getString(mimeCol) ?: "video/*" else "video/*"
-                    val duration = if (durCol != -1) cursor.getLong(durCol) else 0L
-                    val mod = if (modCol != -1) cursor.getLong(modCol) else 0L
-                    val dataPath = if (dataCol != -1) cursor.getString(dataCol) else null
-
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    val storage = resolveStorageLocation(volume, dataPath)
-                    if (!dataPath.isNullOrBlank()) seenPaths.add(dataPath)
-                    val sig = "vid:${name}_${size}"
-                    if (seenSig.add(sig)) {
-                        out.add(
-                            PickerMediaItem(
-                                id = "vid:$volume:$id",
-                                name = name,
-                                sizeBytes = size,
-                                uriString = uri.toString(),
-                                mimeType = mime,
-                                durationMs = duration,
-                                dateModifiedSec = mod,
-                                storageLocation = storage,
-                                category = PickerCategory.VIDEO
-                            )
-                        )
-                        onItemAdded()
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun queryAudioFromVolume(
-        context: Context,
-        volume: String,
-        out: MutableList<PickerMediaItem>,
-        seenPaths: MutableSet<String>,
-        seenSig: MutableSet<String>,
-        onItemAdded: () -> Unit = {}
-    ) {
-        val collection = MediaStore.Audio.Media.getContentUri(volume)
-        val projection = arrayOf(
-            MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.DISPLAY_NAME,
-            MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST,
-            MediaStore.Audio.Media.SIZE,
-            MediaStore.Audio.Media.MIME_TYPE,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATE_MODIFIED,
-            MediaStore.Audio.Media.DATA
-        )
-        try {
-            context.contentResolver.query(
-                collection,
-                projection,
-                "${MediaStore.Audio.Media.SIZE} > 0",
-                null,
-                "${MediaStore.Audio.Media.DATE_MODIFIED} DESC"
-            )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val nameCol = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
-                val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
-                val artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
-                val sizeCol = cursor.getColumnIndex(MediaStore.Audio.Media.SIZE)
-                val mimeCol = cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
-                val durCol = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)
-                val modCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATE_MODIFIED)
-                val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
-
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idCol)
                     val displayName = if (nameCol != -1) cursor.getString(nameCol) else null
                     val title = if (titleCol != -1) cursor.getString(titleCol) else null
-                    val name = displayName ?: title ?: "audio_$id.mp3"
-                    val artist = if (artistCol != -1) cursor.getString(artistCol) ?: "" else ""
-                    val cleanArtist = if (artist == "<unknown>") "" else artist
-                    val size = if (sizeCol != -1) cursor.getLong(sizeCol) else 0L
-                    if (size <= 0L) continue
-                    val mime = if (mimeCol != -1) cursor.getString(mimeCol) ?: "audio/*" else "audio/*"
+                    val name = displayName ?: title ?: "${prefix}_$id.$defaultExt"
+                    val rawArtist = if (artistCol != -1) cursor.getString(artistCol).orEmpty() else ""
+                    val artist = if (rawArtist == "<unknown>") "" else rawArtist
+                    val mime = if (mimeCol != -1) cursor.getString(mimeCol) ?: defaultMime else defaultMime
                     val duration = if (durCol != -1) cursor.getLong(durCol) else 0L
                     val mod = if (modCol != -1) cursor.getLong(modCol) else 0L
                     val dataPath = if (dataCol != -1) cursor.getString(dataCol) else null
 
-                    val uri = ContentUris.withAppendedId(collection, id)
-                    val storage = resolveStorageLocation(volume, dataPath)
                     if (!dataPath.isNullOrBlank()) seenPaths.add(dataPath)
-                    val sig = "aud:${name}_${size}"
+                    val sig = "$prefix:${name}_${size}"
                     if (seenSig.add(sig)) {
                         out.add(
                             PickerMediaItem(
-                                id = "aud:$volume:$id",
+                                id = "$prefix:$volume:$id",
                                 name = name,
                                 sizeBytes = size,
-                                uriString = uri.toString(),
+                                uriString = ContentUris.withAppendedId(collection, id).toString(),
                                 mimeType = mime,
                                 durationMs = duration,
-                                artist = cleanArtist,
+                                artist = artist,
                                 dateModifiedSec = mod,
-                                storageLocation = storage,
-                                category = PickerCategory.MUSIC
+                                category = category
                             )
                         )
                         onItemAdded()
@@ -1119,12 +822,10 @@ object DeviceMediaScanner {
         seenSig: MutableSet<String>,
         onItemAdded: () -> Unit = {}
     ) {
-        val roots = collectStorageRoots(context)
-        for ((rootDir, storageLoc) in roots) {
+        for (rootDir in collectStorageRoots(context)) {
             walkMediaDirectory(
                 dir = rootDir,
                 depth = 0,
-                storageLocation = storageLoc,
                 images = images,
                 videos = videos,
                 music = music,
@@ -1135,13 +836,13 @@ object DeviceMediaScanner {
         }
     }
 
-    private fun collectStorageRoots(context: Context): List<Pair<File, StorageLocation>> {
-        val roots = LinkedHashMap<String, Pair<File, StorageLocation>>()
+    private fun collectStorageRoots(context: Context): List<File> {
+        val roots = LinkedHashMap<String, File>()
 
         try {
             val primary = Environment.getExternalStorageDirectory()
             if (primary != null && primary.exists() && primary.canRead()) {
-                roots[primary.absolutePath] = primary to StorageLocation.INTERNAL
+                roots[primary.absolutePath] = primary
             }
         } catch (_: Exception) {}
 
@@ -1151,22 +852,20 @@ object DeviceMediaScanner {
                 sm?.storageVolumes?.forEach { vol ->
                     val dir = vol.directory
                     if (dir != null && dir.exists() && dir.canRead()) {
-                        val loc = if (vol.isRemovable) StorageLocation.SD_CARD else StorageLocation.INTERNAL
-                        roots[dir.absolutePath] = dir to loc
+                        roots[dir.absolutePath] = dir
                     }
                 }
             } catch (_: Exception) {}
         }
 
         try {
-            context.getExternalFilesDirs(null).forEachIndexed { index, appDir ->
-                val path = appDir?.absolutePath ?: return@forEachIndexed
+            context.getExternalFilesDirs(null).forEach { appDir ->
+                val path = appDir?.absolutePath ?: return@forEach
                 val androidIdx = path.indexOf("/Android/")
                 if (androidIdx > 0) {
                     val rootFile = File(path.substring(0, androidIdx))
                     if (rootFile.exists() && rootFile.canRead()) {
-                        val loc = if (index == 0) StorageLocation.INTERNAL else StorageLocation.SD_CARD
-                        roots.putIfAbsent(rootFile.absolutePath, rootFile to loc)
+                        roots.putIfAbsent(rootFile.absolutePath, rootFile)
                     }
                 }
             }
@@ -1178,7 +877,6 @@ object DeviceMediaScanner {
     private fun walkMediaDirectory(
         dir: File,
         depth: Int,
-        storageLocation: StorageLocation,
         images: MutableList<PickerMediaItem>,
         videos: MutableList<PickerMediaItem>,
         music: MutableList<PickerMediaItem>,
@@ -1196,7 +894,6 @@ object DeviceMediaScanner {
                 walkMediaDirectory(
                     dir = file,
                     depth = depth + 1,
-                    storageLocation = storageLocation,
                     images = images,
                     videos = videos,
                     music = music,
@@ -1208,64 +905,32 @@ object DeviceMediaScanner {
                 val absPath = file.absolutePath
                 if (seenPaths.contains(absPath)) continue
                 val ext = name.substringAfterLast('.', "").lowercase()
-                val modSec = file.lastModified() / 1000L
-                val uri = Uri.fromFile(file).toString()
+                val categoryInfo = when {
+                    ext in imageExts -> Triple(PickerCategory.IMAGE, "img", "image/$ext")
+                    ext in videoExts -> Triple(PickerCategory.VIDEO, "vid", "video/$ext")
+                    ext in audioExts -> Triple(PickerCategory.MUSIC, "aud", "audio/$ext")
+                    else -> null
+                } ?: continue
 
-                when {
-                    ext in imageExts -> {
-                        val sig = "img:${name}_${file.length()}"
-                        if (seenPaths.add(absPath) && seenSig.add(sig)) {
-                            images.add(
-                                PickerMediaItem(
-                                    id = "fs:$absPath",
-                                    name = name,
-                                    sizeBytes = file.length(),
-                                    uriString = uri,
-                                    mimeType = "image/$ext",
-                                    dateModifiedSec = modSec,
-                                    storageLocation = storageLocation,
-                                    category = PickerCategory.IMAGE
-                                )
-                            )
-                            onItemAdded()
-                        }
+                val (category, prefix, mime) = categoryInfo
+                val sig = "$prefix:${name}_${file.length()}"
+                if (seenPaths.add(absPath) && seenSig.add(sig)) {
+                    val item = PickerMediaItem(
+                        id = "fs:$absPath",
+                        name = name,
+                        sizeBytes = file.length(),
+                        uriString = Uri.fromFile(file).toString(),
+                        mimeType = mime,
+                        dateModifiedSec = file.lastModified() / 1000L,
+                        category = category
+                    )
+                    when (category) {
+                        PickerCategory.IMAGE -> images.add(item)
+                        PickerCategory.VIDEO -> videos.add(item)
+                        PickerCategory.MUSIC -> music.add(item)
+                        PickerCategory.APPS -> Unit
                     }
-                    ext in videoExts -> {
-                        val sig = "vid:${name}_${file.length()}"
-                        if (seenPaths.add(absPath) && seenSig.add(sig)) {
-                            videos.add(
-                                PickerMediaItem(
-                                    id = "fs:$absPath",
-                                    name = name,
-                                    sizeBytes = file.length(),
-                                    uriString = uri,
-                                    mimeType = "video/$ext",
-                                    dateModifiedSec = modSec,
-                                    storageLocation = storageLocation,
-                                    category = PickerCategory.VIDEO
-                                )
-                            )
-                            onItemAdded()
-                        }
-                    }
-                    ext in audioExts -> {
-                        val sig = "aud:${name}_${file.length()}"
-                        if (seenPaths.add(absPath) && seenSig.add(sig)) {
-                            music.add(
-                                PickerMediaItem(
-                                    id = "fs:$absPath",
-                                    name = name,
-                                    sizeBytes = file.length(),
-                                    uriString = uri,
-                                    mimeType = "audio/$ext",
-                                    dateModifiedSec = modSec,
-                                    storageLocation = storageLocation,
-                                    category = PickerCategory.MUSIC
-                                )
-                            )
-                            onItemAdded()
-                        }
-                    }
+                    onItemAdded()
                 }
             }
         }

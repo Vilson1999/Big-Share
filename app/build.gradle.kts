@@ -1,7 +1,6 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.secrets)
 }
 
 val isSplitApk = project.hasProperty("splitApk")
@@ -99,9 +98,14 @@ android {
         "META-INF/NOTICE*",
         "META-INF/*.kotlin_module",
         "META-INF/*.version",
+        "META-INF/androidx.*.version",
+        "META-INF/com.google.*.version",
         "**/*.kotlin_builtins",
         "**/*.kotlin_metadata",
-        "DebugProbesKt.bin"
+        "kotlin-tooling-metadata.json",
+        "DebugProbesKt.bin",
+        "META-INF/README*",
+        "META-INF/CHANGES*"
       )
     }
   }
@@ -110,12 +114,6 @@ android {
     includeInApk = false
     includeInBundle = false
   }
-}
-
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
 dependencies {

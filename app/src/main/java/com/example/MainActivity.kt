@@ -279,7 +279,6 @@ fun MainAppContent(
     val isTransferActive by viewModel.isTransferActive.collectAsStateWithLifecycle()
     val isTransferComplete by viewModel.isTransferComplete.collectAsStateWithLifecycle()
     val transferError by viewModel.transferError.collectAsStateWithLifecycle()
-    val thisDevice by viewModel.thisDevice.collectAsStateWithLifecycle()
     val userName by viewModel.userName.collectAsStateWithLifecycle()
     val userAvatarIndex by viewModel.userAvatarIndex.collectAsStateWithLifecycle()
     val isProfileCompleted by viewModel.isProfileCompleted.collectAsStateWithLifecycle()
@@ -322,11 +321,7 @@ fun MainAppContent(
         }
     }
 
-    // Settings launcher
-    val settingsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) {
-        awaitingExternalModal = false
+    val recheckPendingSetting: () -> Unit = {
         val action = pendingAction
         if (action != null) {
             val missing = getMissingRequiredSetting(context)
@@ -338,6 +333,14 @@ fun MainAppContent(
                 missingSetting = missing
             }
         }
+    }
+
+    // Settings launcher
+    val settingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        awaitingExternalModal = false
+        recheckPendingSetting()
     }
 
     // Permission launcher
@@ -387,16 +390,8 @@ fun MainAppContent(
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     awaitingExternalModal = false
-                    val action = pendingAction
-                    if (action != null && missingSetting != null) {
-                        val missing = getMissingRequiredSetting(context)
-                        if (missing == null) {
-                            missingSetting = null
-                            pendingAction = null
-                            action()
-                        } else {
-                            missingSetting = missing
-                        }
+                    if (missingSetting != null) {
+                        recheckPendingSetting()
                     }
                 }
                 Lifecycle.Event.ON_STOP -> {
@@ -545,7 +540,6 @@ fun MainAppContent(
                         hasMediaPermission = hasMediaPermission,
                         onEnsureLoaded = { viewModel.ensurePickerFilesLoaded() },
                         onMediaPermissionResult = { viewModel.refreshMediaPermissionAndLoad(forceRefresh = true) },
-                        onRefreshApks = { viewModel.ensureAppsAndApksLoaded(forceRefresh = true) },
                         onBackClick = { viewModel.resetToHome() },
                         onSystemBrowseClick = {
                             awaitingExternalModal = true
@@ -574,7 +568,6 @@ fun MainAppContent(
                         userAvatarIndex = userAvatarIndex,
                         connectingDeviceAddress = connectingDeviceAddress,
                         onBackClick = { viewModel.resetToHome() },
-                        onRescanClick = { viewModel.startRadarScan() },
                         onDeviceClick = { device -> viewModel.connectAndSend(device) }
                     )
                 }
@@ -586,7 +579,6 @@ fun MainAppContent(
                     ReceiveScreen(
                         userName = userName,
                         userAvatarIndex = userAvatarIndex,
-                        thisDevice = thisDevice,
                         onBackClick = { viewModel.resetToHome() }
                     )
                 }

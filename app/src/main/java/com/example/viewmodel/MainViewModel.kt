@@ -112,9 +112,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val peerUserNames = wifiDirectManager.peerUserNames
     val peerAvatars = wifiDirectManager.peerAvatars
     val isDiscovering = wifiDirectManager.isDiscovering
-    val isWifiEnabled = wifiDirectManager.isWifiP2pEnabled
-    val thisDevice = wifiDirectManager.thisDevice
-    val isConnected = wifiDirectManager.isConnected
 
     private val _userName = MutableStateFlow(
         prefs.getString("user_name", null) ?: (android.os.Build.MODEL ?: "User")
@@ -125,14 +122,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.getInt("user_avatar_index", 0).coerceIn(0, 9)
     )
     val userAvatarIndex: StateFlow<Int> = _userAvatarIndex.asStateFlow()
-
-    fun updateUserName(name: String) {
-        val trimmed = name.trim()
-        if (trimmed.isNotEmpty()) {
-            _userName.value = trimmed
-            prefs.edit().putString("user_name", trimmed).apply()
-        }
-    }
 
     fun openProfile() {
         _transferError.value = null
@@ -166,8 +155,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 connectTimeoutJob?.cancel()
                                 stopDiscoveryLoop()
                                 wifiDirectManager.stopDiscovery()
-                                bluetoothDiscoveryHelper.stopAll()
-                                _connectingDeviceAddress.value = null
                                 startSendingFiles(isGroupOwner = isGo, hostAddress = host)
                             }
                         }
@@ -176,7 +163,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 stopDiscoveryLoop()
                                 wifiDirectManager.stopDiscovery()
                                 wifiDirectManager.stopReceiveListening()
-                                bluetoothDiscoveryHelper.stopAll()
                                 startReceivingFiles(isGroupOwner = isGo, hostAddress = host)
                             }
                         }
@@ -198,9 +184,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshMediaPermissionAndLoad(forceRefresh: Boolean = false) {
+        val wasGranted = _hasMediaPermission.value
         val granted = DeviceMediaScanner.hasAnyMediaReadPermission(getApplication())
         _hasMediaPermission.value = granted
         if (!granted) return
+        if (!wasGranted) {
+            ensureAppsAndApksLoaded(forceRefresh = true)
+        }
         if (!forceRefresh && (hasCompletedMediaScan || mediaPreloadJob?.isActive == true)) return
 
         mediaPreloadJob?.cancel()
@@ -332,13 +322,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun startRadarScan() {
-        _connectingDeviceAddress.value = null
-        wifiDirectManager.cancelConnect {
-            startDiscoveryLoop()
-        }
-    }
-
     private fun startDiscoveryLoop() {
         discoveryJob?.cancel()
         discoveryJob = viewModelScope.launch {
@@ -380,9 +363,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         lastPeerDiscoveryAt = now
                         lastServiceDiscoveryAt = 0L
                         wifiDirectManager.discoverPeers(
-                            onSuccess = {
-                                Log.d("MainViewModel", "Discovery started")
-                            },
                             onFailure = { reason ->
                                 Log.e("MainViewModel", "Discovery failed: $reason")
                                 if (reason == WifiP2pManager.P2P_UNSUPPORTED) {
@@ -455,7 +435,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (info.groupFormed && _currentScreen.value == AppScreen.RADAR && !_isTransferActive.value) {
                     stopDiscoveryLoop()
                     wifiDirectManager.stopDiscovery()
-                    _connectingDeviceAddress.value = null
                     val host = info.groupOwnerAddress?.hostAddress ?: "192.168.49.1"
                     startSendingFiles(isGroupOwner = info.isGroupOwner, hostAddress = host)
                 }
@@ -467,9 +446,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             wifiDirectManager.connectToDevice(
                 device = device,
                 groupOwnerIntent = 0,
-                onSuccess = {
-                    Log.d("MainViewModel", "Connection initiated with ${device.deviceName}")
-                },
                 onFailure = { reason ->
                     if (reason == WifiP2pManager.BUSY || reason == WifiP2pManager.ERROR) {
                         wifiDirectManager.cancelConnect {
@@ -515,12 +491,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else -> "Error"
     }
 
+    private fun handleTransferComplete(
+        success: Boolean,
+        error: String?,
+        clearConnecting: Boolean
+    ) {
+        if (clearConnecting) {
+            _connectingDeviceAddress.value = null
+        }
+        _isTransferActive.value = false
+        _isTransferComplete.value = success
+        if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
+            _transferError.value = error
+        }
+    }
+
     private fun startSendingFiles(isGroupOwner: Boolean, hostAddress: String) {
         if (_isTransferActive.value) return
         _isTransferActive.value = true
         _isTransferComplete.value = false
         _transferError.value = null
-        _currentScreen.value = AppScreen.TRANSFER
 
         transferJob?.cancel()
         transferJob = viewModelScope.launch {
@@ -528,16 +518,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isGroupOwner = isGroupOwner,
                 hostAddress = hostAddress,
                 files = _selectedFiles.value,
+                onTransferStarted = { initialFiles, initialStats ->
+                    _connectingDeviceAddress.value = null
+                    _transferFiles.value = initialFiles
+                    _transferStats.value = initialStats
+                    _currentScreen.value = AppScreen.TRANSFER
+                },
                 onProgress = { updatedFiles, stats ->
                     _transferFiles.value = updatedFiles
                     _transferStats.value = stats
                 },
                 onComplete = { success, error ->
-                    _isTransferActive.value = false
-                    _isTransferComplete.value = true
-                    if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
-                        _transferError.value = error
-                    }
+                    handleTransferComplete(success, error, clearConnecting = true)
                 }
             )
         }
@@ -550,7 +542,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _transferError.value = null
         _transferFiles.value = emptyList()
         _transferStats.value = TransferStats()
-        _currentScreen.value = AppScreen.TRANSFER
 
         transferEngine.stopTransfer()
         transferJob?.cancel()
@@ -558,16 +549,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             transferEngine.receiveFiles(
                 isGroupOwner = isGroupOwner,
                 hostAddress = hostAddress,
+                onTransferStarted = { initialFiles, initialStats ->
+                    _transferFiles.value = initialFiles
+                    _transferStats.value = initialStats
+                    _currentScreen.value = AppScreen.TRANSFER
+                },
                 onProgress = { updatedFiles, stats ->
                     _transferFiles.value = updatedFiles
                     _transferStats.value = stats
                 },
                 onComplete = { success, error ->
-                    _isTransferActive.value = false
-                    _isTransferComplete.value = success
-                    if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
-                        _transferError.value = error
-                    }
+                    handleTransferComplete(success, error, clearConnecting = false)
                 }
             )
         }
@@ -611,7 +603,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         connectTimeoutJob?.cancel()
         stopDiscoveryLoop()
         cancelAllTransfers()
-        bluetoothDiscoveryHelper.stopAll()
         wifiDirectManager.stopDiscovery()
         wifiDirectManager.disconnect()
         _connectingDeviceAddress.value = null

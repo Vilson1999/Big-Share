@@ -37,27 +37,6 @@ object AppIcons {
         )
     }
 
-    val Edit: ImageVector by lazy {
-        vectorIcon(
-            name = "Edit",
-            pathData = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z"
-        )
-    }
-
-    val Refresh: ImageVector by lazy {
-        vectorIcon(
-            name = "Refresh",
-            pathData = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z"
-        )
-    }
-
-    val Devices: ImageVector by lazy {
-        vectorIcon(
-            name = "Devices",
-            pathData = "M4,6h18V4H4c-1.1,0 -2,0.9 -2,2v11H0v3h14v-3H4V6zM23,8h-6c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h6c0.55,0 1,-0.45 1,-1V9c0,-0.55 -0.45,-1 -1,-1zM22,17h-4v-7h4v7z"
-        )
-    }
-
     val Close: ImageVector by lazy {
         vectorIcon(
             name = "Close",
@@ -135,31 +114,10 @@ object AppIcons {
         )
     }
 
-    val PlayArrow: ImageVector by lazy {
-        vectorIcon(
-            name = "PlayArrow",
-            pathData = "M8,5v14l11,-7z"
-        )
-    }
-
     val SdCard: ImageVector by lazy {
         vectorIcon(
             name = "SdCard",
             pathData = "M18,2h-8L4.02,8 4,20c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM12,8h-2V4h2v4zM15,8h-2V4h2v4zM18,8h-2V4h2v4z"
-        )
-    }
-
-    val Wifi: ImageVector by lazy {
-        vectorIcon(
-            name = "Wifi",
-            pathData = "M1,9l2,2c4.97,-4.97 13.03,-4.97 18,0l2,-2C16.93,2.93 7.08,2.93 1,9zM9,17l3,3 3,-3c-1.65,-1.66 -4.34,-1.66 -6,0zM5,13l2,2c2.76,-2.76 7.24,-2.76 10,0l2,-2C15.14,9.14 8.87,9.14 5,13z"
-        )
-    }
-
-    val Bolt: ImageVector by lazy {
-        vectorIcon(
-            name = "Bolt",
-            pathData = "M11,21h-1l1,-7H7.5c-0.58,0 -0.57,-0.32 -0.38,-0.66 0.19,-0.34 0.05,-0.08 0.07,-0.12C8.48,10.94 10.42,7.54 13,3h1l-1,7h3.5c0.49,0 0.56,0.33 0.47,0.51l-0.07,0.15C12.96,17.55 11,21 11,21z"
         )
     }
 

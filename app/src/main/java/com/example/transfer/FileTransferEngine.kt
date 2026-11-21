@@ -40,11 +40,17 @@ class FileTransferEngine(private val context: Context) {
     companion object {
         const val PORT = 8888
         private const val CHUNK_SIZE = 64 * 1024 // 64 KB
+        private const val SOCKET_BUFFER_BYTES = 256 * 1024 // 256 KB to keep sender/receiver progress tightly synced
         private const val MAGIC_HEADER = 0x50325046 // 'P2PF'
         private const val CODE_DATA = 1
         private const val CODE_SKIP = 2
         private const val CODE_CANCELLED_MID = -1
         private const val CODE_EOF = 0
+        private const val ACK_METADATA_READY = 1
+        private const val SYNC_START_TRANSFER = 2
+        private const val ACK_FILE_DONE = 3
+        private const val ACK_ALL_DONE = 4
+        private const val PROGRESS_INTERVAL_MS = 250L
         private const val CONNECT_MAX_ATTEMPTS = 25
         private const val CONNECT_RETRY_DELAY_MS = 400L
     }
@@ -58,10 +64,6 @@ class FileTransferEngine(private val context: Context) {
         cancelledFileIds.add(fileId)
     }
 
-    fun isFileCancelled(fileId: String): Boolean {
-        return cancelledFileIds.contains(fileId)
-    }
-
     fun stopTransfer() {
         isRunning.set(false)
         try {
@@ -72,6 +74,11 @@ class FileTransferEngine(private val context: Context) {
         } catch (_: Exception) {}
         clientSocket = null
         serverSocket = null
+    }
+
+    private fun isExpectedSocketClosure(e: Exception, active: Boolean): Boolean {
+        return !isRunning.get() || !active ||
+            (e is SocketException && e.message?.contains("closed", ignoreCase = true) == true)
     }
 
     private suspend fun openPeerSocket(
@@ -92,6 +99,10 @@ class FileTransferEngine(private val context: Context) {
             serverSocket = null
             accepted.tcpNoDelay = true
             accepted.soTimeout = 60000
+            try {
+                accepted.sendBufferSize = SOCKET_BUFFER_BYTES
+                accepted.receiveBufferSize = SOCKET_BUFFER_BYTES
+            } catch (_: Exception) {}
             clientSocket = accepted
             return accepted
         } else {
@@ -103,6 +114,10 @@ class FileTransferEngine(private val context: Context) {
                 }
                 val socket = Socket()
                 try {
+                    try {
+                        socket.sendBufferSize = SOCKET_BUFFER_BYTES
+                        socket.receiveBufferSize = SOCKET_BUFFER_BYTES
+                    } catch (_: Exception) {}
                     val localP2pAddress = findLocalP2pInterfaceAddress()
                     if (localP2pAddress != null) {
                         socket.bind(InetSocketAddress(localP2pAddress, 0))
@@ -159,6 +174,7 @@ class FileTransferEngine(private val context: Context) {
         isGroupOwner: Boolean,
         hostAddress: String,
         files: List<FileItem>,
+        onTransferStarted: (List<FileItem>, TransferStats) -> Unit,
         onProgress: (List<FileItem>, TransferStats) -> Unit,
         onComplete: (Boolean, String?) -> Unit
     ) = withContext(Dispatchers.IO) {
@@ -192,11 +208,18 @@ class FileTransferEngine(private val context: Context) {
             }
             outputStream.flush()
 
-            // Wait for receiver ACK
-            val ack = inputStream.readByte()
-            if (ack.toInt() != 1) {
+            // Wait for receiver metadata ACK, then send START_SYNC so both devices show TransferScreen together
+            val ack = inputStream.readByte().toInt()
+            if (ack != ACK_METADATA_READY) {
                 throw IllegalStateException("Receiver declined transfer")
             }
+            outputStream.writeByte(SYNC_START_TRANSFER)
+            outputStream.flush()
+
+            onTransferStarted(
+                mutableFiles.toList(),
+                calculateStats(totalBytes, 0L, 0L, maxProgress = 0.99f)
+            )
 
             val buffer = ByteArray(CHUNK_SIZE)
 
@@ -207,8 +230,33 @@ class FileTransferEngine(private val context: Context) {
                 if (cancelledFileIds.contains(currentFile.id)) {
                     outputStream.writeByte(CODE_SKIP)
                     outputStream.flush()
+                    inputStream.readByte() // Wait for receiver ACK_FILE_DONE
                     mutableFiles[i] = currentFile.copy(status = TransferStatus.CANCELLED)
-                    onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
+                    onProgress(
+                        mutableFiles.toList(),
+                        calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                    )
+                    continue
+                }
+
+                val uri = currentFile.uriString?.let { Uri.parse(it) }
+                val fileInputStream: InputStream? = if (uri != null) {
+                    try {
+                        context.contentResolver.openInputStream(uri)
+                    } catch (_: Exception) {
+                        null
+                    }
+                } else null
+
+                if (fileInputStream == null) {
+                    outputStream.writeByte(CODE_SKIP)
+                    outputStream.flush()
+                    inputStream.readByte() // Wait for receiver ACK_FILE_DONE
+                    mutableFiles[i] = currentFile.copy(status = TransferStatus.FAILED)
+                    onProgress(
+                        mutableFiles.toList(),
+                        calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                    )
                     continue
                 }
 
@@ -216,19 +264,10 @@ class FileTransferEngine(private val context: Context) {
                 outputStream.flush()
 
                 mutableFiles[i] = currentFile.copy(status = TransferStatus.TRANSFERRING)
-                onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
-
-                val uri = currentFile.uriString?.let { Uri.parse(it) }
-                val fileInputStream: InputStream? = if (uri != null) {
-                    context.contentResolver.openInputStream(uri)
-                } else null
-
-                if (fileInputStream == null) {
-                    outputStream.writeInt(CODE_SKIP)
-                    outputStream.flush()
-                    mutableFiles[i] = currentFile.copy(status = TransferStatus.FAILED)
-                    continue
-                }
+                onProgress(
+                    mutableFiles.toList(),
+                    calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                )
 
                 var fileTransferred = 0L
                 var fileCancelled = false
@@ -252,7 +291,6 @@ class FileTransferEngine(private val context: Context) {
 
                         outputStream.writeInt(bytesRead)
                         outputStream.write(buffer, 0, bytesRead)
-                        outputStream.flush()
 
                         fileTransferred += bytesRead
                         totalTransferred += bytesRead
@@ -260,18 +298,21 @@ class FileTransferEngine(private val context: Context) {
 
                         val now = System.currentTimeMillis()
                         val elapsed = now - lastSampleTime
-                        if (elapsed >= 400) {
+                        if (elapsed >= PROGRESS_INTERVAL_MS) {
+                            outputStream.flush()
                             currentSpeed = (bytesSample * 1000L) / elapsed.coerceAtLeast(1)
                             bytesSample = 0L
                             lastSampleTime = now
 
+                            // Cap sender UI below 100% of file/batch until receiver confirms file flush on disk
+                            val cappedFileBytes = fileTransferred.coerceAtMost((currentFile.sizeBytes - 1L).coerceAtLeast(0L))
                             mutableFiles[i] = currentFile.copy(
-                                transferredBytes = fileTransferred,
+                                transferredBytes = cappedFileBytes,
                                 status = TransferStatus.TRANSFERRING
                             )
                             onProgress(
                                 mutableFiles.toList(),
-                                calculateStats(totalBytes, totalTransferred, currentSpeed)
+                                calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
                             )
                         }
                     }
@@ -282,42 +323,51 @@ class FileTransferEngine(private val context: Context) {
                     }
                 }
 
+                // Wait until receiver finishes writing to storage and finalizing MediaStore for this file
+                val fileAck = inputStream.readByte().toInt()
+                if (fileAck != ACK_FILE_DONE) {
+                    throw IllegalStateException("Unexpected receiver confirmation")
+                }
+
                 mutableFiles[i] = currentFile.copy(
                     transferredBytes = fileTransferred,
                     status = if (fileCancelled) TransferStatus.CANCELLED else TransferStatus.COMPLETED
                 )
-                onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
+                if (i < mutableFiles.lastIndex) {
+                    onProgress(
+                        mutableFiles.toList(),
+                        calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                    )
+                }
             }
+
+            // Wait for receiver's final ACK_ALL_DONE so both devices hit 100% and Complete at the exact same moment
+            inputStream.readByte()
+            onProgress(
+                mutableFiles.toList(),
+                calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 1.0f)
+            )
+            onComplete(true, null)
 
             try {
                 socket.close()
             } catch (_: Exception) {}
-            onComplete(true, null)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val isExpectedClosure = !isRunning.get() || !coroutineContext.isActive ||
-                    (e is SocketException && e.message?.contains("closed", ignoreCase = true) == true)
-            if (!isExpectedClosure) {
+            if (!isExpectedSocketClosure(e, coroutineContext.isActive)) {
                 Log.e("FileTransferEngine", "Send failed", e)
                 onComplete(false, e.localizedMessage)
             }
         } finally {
-            isRunning.set(false)
-            try {
-                clientSocket?.close()
-            } catch (_: Exception) {}
-            try {
-                serverSocket?.close()
-            } catch (_: Exception) {}
-            clientSocket = null
-            serverSocket = null
+            stopTransfer()
         }
     }
 
     suspend fun receiveFiles(
         isGroupOwner: Boolean,
         hostAddress: String,
+        onTransferStarted: (List<FileItem>, TransferStats) -> Unit,
         onProgress: (List<FileItem>, TransferStats) -> Unit,
         onComplete: (Boolean, String?) -> Unit
     ) = withContext(Dispatchers.IO) {
@@ -353,11 +403,19 @@ class FileTransferEngine(private val context: Context) {
             var bytesSample = 0L
             var currentSpeed = 0L
 
-            // Send ACK
-            outputStream.writeByte(1)
+            // Send metadata ACK, then wait for sender START_SYNC so both screens open together
+            outputStream.writeByte(ACK_METADATA_READY)
             outputStream.flush()
 
-            onProgress(mutableFiles.toList(), calculateStats(totalBytes, 0L, 0L))
+            val startSync = inputStream.readByte().toInt()
+            if (startSync != SYNC_START_TRANSFER) {
+                throw IllegalStateException("Transfer handshake failed")
+            }
+
+            onTransferStarted(
+                mutableFiles.toList(),
+                calculateStats(totalBytes, 0L, 0L, maxProgress = 0.99f)
+            )
 
             val buffer = ByteArray(CHUNK_SIZE)
 
@@ -369,12 +427,22 @@ class FileTransferEngine(private val context: Context) {
 
                 if (fileCode == CODE_SKIP) {
                     mutableFiles[i] = file.copy(status = TransferStatus.CANCELLED)
-                    onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
+                    outputStream.writeByte(ACK_FILE_DONE)
+                    outputStream.flush()
+                    if (i < mutableFiles.lastIndex) {
+                        onProgress(
+                            mutableFiles.toList(),
+                            calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                        )
+                    }
                     continue
                 }
 
                 mutableFiles[i] = file.copy(status = TransferStatus.TRANSFERRING)
-                onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
+                onProgress(
+                    mutableFiles.toList(),
+                    calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                )
 
                 val destination = createDestination(file.name, file.mimeType)
                 var fileTransferred = 0L
@@ -407,7 +475,7 @@ class FileTransferEngine(private val context: Context) {
 
                             val now = System.currentTimeMillis()
                             val elapsed = now - lastSampleTime
-                            if (elapsed >= 400) {
+                            if (elapsed >= PROGRESS_INTERVAL_MS) {
                                 currentSpeed = (bytesSample * 1000L) / elapsed.coerceAtLeast(1)
                                 bytesSample = 0L
                                 lastSampleTime = now
@@ -418,7 +486,7 @@ class FileTransferEngine(private val context: Context) {
                                 )
                                 onProgress(
                                     mutableFiles.toList(),
-                                    calculateStats(totalBytes, totalTransferred, currentSpeed)
+                                    calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
                                 )
                             }
                         }
@@ -434,32 +502,42 @@ class FileTransferEngine(private val context: Context) {
                     transferredBytes = fileTransferred,
                     status = if (isCancelled) TransferStatus.CANCELLED else TransferStatus.COMPLETED
                 )
-                onProgress(mutableFiles.toList(), calculateStats(totalBytes, totalTransferred, currentSpeed))
+                outputStream.writeByte(ACK_FILE_DONE)
+                outputStream.flush()
+                if (i < mutableFiles.lastIndex) {
+                    onProgress(
+                        mutableFiles.toList(),
+                        calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
+                    )
+                }
             }
 
+            // Emit 100% + Complete simultaneously with sender right as ACK_ALL_DONE is flushed
+            outputStream.writeByte(ACK_ALL_DONE)
+            outputStream.flush()
+            onProgress(
+                mutableFiles.toList(),
+                calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 1.0f)
+            )
+            onComplete(true, null)
+
+            // Wait briefly for sender to read ACK_ALL_DONE and close socket cleanly
+            try {
+                socket.soTimeout = 1500
+                inputStream.read()
+            } catch (_: Exception) {}
             try {
                 socket.close()
             } catch (_: Exception) {}
-            onComplete(true, null)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val isExpectedClosure = !isRunning.get() || !coroutineContext.isActive ||
-                    (e is SocketException && e.message?.contains("closed", ignoreCase = true) == true)
-            if (!isExpectedClosure) {
+            if (!isExpectedSocketClosure(e, coroutineContext.isActive)) {
                 Log.e("FileTransferEngine", "Receive failed", e)
                 onComplete(false, e.localizedMessage)
             }
         } finally {
-            isRunning.set(false)
-            try {
-                clientSocket?.close()
-            } catch (_: Exception) {}
-            try {
-                serverSocket?.close()
-            } catch (_: Exception) {}
-            clientSocket = null
-            serverSocket = null
+            stopTransfer()
         }
     }
 
@@ -588,10 +666,16 @@ class FileTransferEngine(private val context: Context) {
         return target
     }
 
-    private fun calculateStats(totalBytes: Long, transferredBytes: Long, speed: Long): TransferStats {
+    private fun calculateStats(
+        totalBytes: Long,
+        transferredBytes: Long,
+        speed: Long,
+        maxProgress: Float = 1.0f
+    ): TransferStats {
         val effectiveTotal = totalBytes.coerceAtLeast(transferredBytes)
         val safeTransferred = transferredBytes.coerceAtMost(effectiveTotal)
-        val progress = if (effectiveTotal > 0) (safeTransferred.toFloat() / effectiveTotal).coerceIn(0f, 1f) else 0f
+        val rawProgress = if (effectiveTotal > 0) (safeTransferred.toFloat() / effectiveTotal).coerceIn(0f, 1f) else 0f
+        val progress = rawProgress.coerceAtMost(maxProgress)
         val remainingBytes = (effectiveTotal - safeTransferred).coerceAtLeast(0)
         val remainingSeconds = if (speed > 0) remainingBytes / speed else 0L
 
