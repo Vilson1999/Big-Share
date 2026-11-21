@@ -18,6 +18,9 @@ import com.example.model.TransferStats
 import com.example.model.TransferStatus
 import com.example.p2p.BluetoothDiscoveryHelper
 import com.example.p2p.WifiDirectManager
+import com.example.picker.DeviceMediaScanner
+import com.example.picker.PickerAppItem
+import com.example.picker.PickerMediaItem
 import com.example.transfer.FileTransferEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -74,8 +77,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var transferJob: Job? = null
     private var discoveryJob: Job? = null
     private var connectTimeoutJob: Job? = null
+    private var mediaPreloadJob: Job? = null
+    private var appsPreloadJob: Job? = null
+    private var hasCompletedMediaScan = false
+    private var hasCompletedAppsScan = false
+
+    private val _pickerImages = MutableStateFlow<List<PickerMediaItem>>(emptyList())
+    val pickerImages: StateFlow<List<PickerMediaItem>> = _pickerImages.asStateFlow()
+
+    private val _pickerVideos = MutableStateFlow<List<PickerMediaItem>>(emptyList())
+    val pickerVideos: StateFlow<List<PickerMediaItem>> = _pickerVideos.asStateFlow()
+
+    private val _pickerMusic = MutableStateFlow<List<PickerMediaItem>>(emptyList())
+    val pickerMusic: StateFlow<List<PickerMediaItem>> = _pickerMusic.asStateFlow()
+
+    private val _pickerInstalledApps = MutableStateFlow<List<PickerAppItem>>(emptyList())
+    val pickerInstalledApps: StateFlow<List<PickerAppItem>> = _pickerInstalledApps.asStateFlow()
+
+    private val _pickerApkFiles = MutableStateFlow<List<PickerAppItem>>(emptyList())
+    val pickerApkFiles: StateFlow<List<PickerAppItem>> = _pickerApkFiles.asStateFlow()
+
+    private val _isScanningMedia = MutableStateFlow(false)
+    val isScanningMedia: StateFlow<Boolean> = _isScanningMedia.asStateFlow()
+
+    private val _isScanningApps = MutableStateFlow(false)
+    val isScanningApps: StateFlow<Boolean> = _isScanningApps.asStateFlow()
+
+    private val _hasMediaPermission = MutableStateFlow(
+        DeviceMediaScanner.hasAnyMediaReadPermission(application)
+    )
+    val hasMediaPermission: StateFlow<Boolean> = _hasMediaPermission.asStateFlow()
 
     val peers = wifiDirectManager.peers
+    val peerUserNames = wifiDirectManager.peerUserNames
+    val peerAvatars = wifiDirectManager.peerAvatars
     val isDiscovering = wifiDirectManager.isDiscovering
     val isWifiEnabled = wifiDirectManager.isWifiP2pEnabled
     val thisDevice = wifiDirectManager.thisDevice
@@ -119,6 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        preloadDeviceFilesOnStartup()
         viewModelScope.launch {
             wifiDirectManager.connectionInfo.collect { info ->
                 if (info != null && info.groupFormed) {
@@ -151,8 +187,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun preloadDeviceFilesOnStartup() {
+        ensureAppsAndApksLoaded(forceRefresh = false)
+        refreshMediaPermissionAndLoad(forceRefresh = false)
+    }
+
+    fun ensurePickerFilesLoaded() {
+        ensureAppsAndApksLoaded(forceRefresh = false)
+        refreshMediaPermissionAndLoad(forceRefresh = false)
+    }
+
+    fun refreshMediaPermissionAndLoad(forceRefresh: Boolean = false) {
+        val granted = DeviceMediaScanner.hasAnyMediaReadPermission(getApplication())
+        _hasMediaPermission.value = granted
+        if (!granted) return
+        if (!forceRefresh && (hasCompletedMediaScan || mediaPreloadJob?.isActive == true)) return
+
+        mediaPreloadJob?.cancel()
+        mediaPreloadJob = viewModelScope.launch {
+            _isScanningMedia.value = true
+            try {
+                DeviceMediaScanner.scanMediaFilesProgressively(getApplication()) { imgs, vids, mus ->
+                    _pickerImages.value = imgs
+                    _pickerVideos.value = vids
+                    _pickerMusic.value = mus
+                }
+                hasCompletedMediaScan = true
+            } finally {
+                _isScanningMedia.value = false
+            }
+        }
+    }
+
+    fun ensureAppsAndApksLoaded(forceRefresh: Boolean = false) {
+        if (!forceRefresh && (hasCompletedAppsScan || appsPreloadJob?.isActive == true)) return
+
+        appsPreloadJob?.cancel()
+        appsPreloadJob = viewModelScope.launch {
+            _isScanningApps.value = true
+            try {
+                DeviceMediaScanner.scanAppsAndApksProgressively(getApplication()) { installed, apks ->
+                    if (!forceRefresh || installed.isNotEmpty() || !hasCompletedAppsScan) {
+                        _pickerInstalledApps.value = installed
+                    }
+                    if (!forceRefresh || apks.isNotEmpty() || !hasCompletedAppsScan) {
+                        _pickerApkFiles.value = apks
+                    }
+                }
+                hasCompletedAppsScan = true
+            } finally {
+                _isScanningApps.value = false
+            }
+        }
+    }
+
     fun openFilePicker() {
         _transferError.value = null
+        ensurePickerFilesLoaded()
         _currentScreen.value = AppScreen.FILE_PICKER
     }
 
@@ -264,7 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     firstRun = false
                     lastPeerDiscoveryAt = now
                     bluetoothDiscoveryHelper.startAdvertising()
-                    wifiDirectManager.registerLocalReceiveService(_userName.value) {
+                    wifiDirectManager.registerLocalReceiveService(_userName.value, _userAvatarIndex.value) {
                         wifiDirectManager.startReceiveListening(
                             onFailure = { reason ->
                                 Log.e("MainViewModel", "Receive listen failed: $reason")
@@ -287,7 +378,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (needsPeerRefresh) {
                         firstRun = false
                         lastPeerDiscoveryAt = now
-                        lastServiceDiscoveryAt = now
+                        lastServiceDiscoveryAt = 0L
                         wifiDirectManager.discoverPeers(
                             onSuccess = {
                                 Log.d("MainViewModel", "Discovery started")
@@ -299,10 +390,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 }
                             }
                         )
-                    } else if (now - lastServiceDiscoveryAt >= 10000L) {
-                        // Let discoverPeers sweep channels cleanly before querying DNS-SD service names
+                    } else if (now - lastServiceDiscoveryAt >= 6000L) {
+                        // Query DNS-SD TXT records promptly for peer user names and avatar icons
                         lastServiceDiscoveryAt = now
-                        serviceWindowUntil = now + 4000L
+                        serviceWindowUntil = now + 3500L
                         wifiDirectManager.discoverMiniShareServices()
                     }
                 } else if (isReceive && !_isTransferActive.value) {
@@ -508,6 +599,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForegrounded() {
         wifiDirectManager.ensureRegistered()
+        ensurePickerFilesLoaded()
     }
 
     fun onAppBackgrounded() {

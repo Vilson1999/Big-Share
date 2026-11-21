@@ -64,6 +64,7 @@ import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.RadarScreen
 import com.example.ui.screens.ReceiveScreen
 import com.example.ui.screens.TransferScreen
+import com.example.ui.components.KeepScreenOnEffect
 import com.example.ui.theme.AppTheme
 import com.example.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -260,12 +261,16 @@ fun MainAppContent(
     incomingSharedUris: List<Uri> = emptyList(),
     onConsumeSharedUris: () -> Unit = {}
 ) {
+    KeepScreenOnEffect()
+
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val peers by viewModel.peers.collectAsStateWithLifecycle()
+    val peerUserNames by viewModel.peerUserNames.collectAsStateWithLifecycle()
+    val peerAvatars by viewModel.peerAvatars.collectAsStateWithLifecycle()
     val isScanning by viewModel.isDiscovering.collectAsStateWithLifecycle()
     val selectedFiles by viewModel.selectedFiles.collectAsStateWithLifecycle()
     val transferFiles by viewModel.transferFiles.collectAsStateWithLifecycle()
@@ -280,6 +285,14 @@ fun MainAppContent(
     val isProfileCompleted by viewModel.isProfileCompleted.collectAsStateWithLifecycle()
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
     val connectingDeviceAddress by viewModel.connectingDeviceAddress.collectAsStateWithLifecycle()
+    val pickerImages by viewModel.pickerImages.collectAsStateWithLifecycle()
+    val pickerVideos by viewModel.pickerVideos.collectAsStateWithLifecycle()
+    val pickerMusic by viewModel.pickerMusic.collectAsStateWithLifecycle()
+    val pickerInstalledApps by viewModel.pickerInstalledApps.collectAsStateWithLifecycle()
+    val pickerApkFiles by viewModel.pickerApkFiles.collectAsStateWithLifecycle()
+    val isScanningMedia by viewModel.isScanningMedia.collectAsStateWithLifecycle()
+    val isScanningApps by viewModel.isScanningApps.collectAsStateWithLifecycle()
+    val hasMediaPermission by viewModel.hasMediaPermission.collectAsStateWithLifecycle()
 
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var awaitingExternalModal by remember { mutableStateOf(false) }
@@ -522,6 +535,17 @@ fun MainAppContent(
                         viewModel.resetToHome()
                     }
                     FilePickerScreen(
+                        images = pickerImages,
+                        videos = pickerVideos,
+                        music = pickerMusic,
+                        installedApps = pickerInstalledApps,
+                        apkFiles = pickerApkFiles,
+                        isScanningMedia = isScanningMedia,
+                        isScanningApps = isScanningApps,
+                        hasMediaPermission = hasMediaPermission,
+                        onEnsureLoaded = { viewModel.ensurePickerFilesLoaded() },
+                        onMediaPermissionResult = { viewModel.refreshMediaPermissionAndLoad(forceRefresh = true) },
+                        onRefreshApks = { viewModel.ensureAppsAndApksLoaded(forceRefresh = true) },
                         onBackClick = { viewModel.resetToHome() },
                         onSystemBrowseClick = {
                             awaitingExternalModal = true
@@ -542,8 +566,11 @@ fun MainAppContent(
                     }
                     RadarScreen(
                         peers = peers,
+                        peerUserNames = peerUserNames,
+                        peerAvatars = peerAvatars,
                         selectedFiles = selectedFiles,
                         isScanning = isScanning,
+                        userName = userName,
                         userAvatarIndex = userAvatarIndex,
                         connectingDeviceAddress = connectingDeviceAddress,
                         onBackClick = { viewModel.resetToHome() },

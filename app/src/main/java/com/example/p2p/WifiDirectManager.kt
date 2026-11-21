@@ -25,7 +25,8 @@ import java.util.concurrent.ConcurrentHashMap
 class WifiDirectManager(private val context: Context) {
 
     companion object {
-        private const val SERVICE_INSTANCE = "_minishare"
+        private const val SERVICE_INSTANCE = "_bigshare"
+        private const val LEGACY_SERVICE_INSTANCE = "_minishare"
         private const val SERVICE_TYPE = "_presence._tcp"
     }
 
@@ -39,6 +40,12 @@ class WifiDirectManager(private val context: Context) {
 
     private val _peers = MutableStateFlow<List<WifiP2pDevice>>(emptyList())
     val peers: StateFlow<List<WifiP2pDevice>> = _peers.asStateFlow()
+
+    private val _peerUserNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val peerUserNames: StateFlow<Map<String, String>> = _peerUserNames.asStateFlow()
+
+    private val _peerAvatars = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val peerAvatars: StateFlow<Map<String, Int>> = _peerAvatars.asStateFlow()
 
     private val _thisDevice = MutableStateFlow<WifiP2pDevice?>(null)
     val thisDevice: StateFlow<WifiP2pDevice?> = _thisDevice.asStateFlow()
@@ -55,6 +62,7 @@ class WifiDirectManager(private val context: Context) {
     private val systemPeers = ConcurrentHashMap<String, WifiP2pDevice>()
     private val servicePeers = ConcurrentHashMap<String, WifiP2pDevice>()
     private val servicePeerNames = ConcurrentHashMap<String, String>()
+    private val servicePeerAvatars = ConcurrentHashMap<String, Int>()
     private var localServiceInfo: WifiP2pDnsSdServiceInfo? = null
     private var serviceRequest: WifiP2pDnsSdServiceRequest? = null
     @Volatile
@@ -108,7 +116,9 @@ class WifiDirectManager(private val context: Context) {
                 }
             }
         }
-        // Show peers advertising Mini Share first
+        // Show peers advertising Big Share first
+        _peerUserNames.value = HashMap(servicePeerNames)
+        _peerAvatars.value = HashMap(servicePeerAvatars)
         _peers.value = merged.values.sortedByDescending {
             servicePeerNames.containsKey(it.deviceAddress) || servicePeers.containsKey(it.deviceAddress)
         }
@@ -216,13 +226,20 @@ class WifiDirectManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun registerLocalReceiveService(userName: String, onDone: (() -> Unit)? = null) {
+    fun registerLocalReceiveService(
+        userName: String,
+        avatarIndex: Int = 0,
+        onDone: (() -> Unit)? = null
+    ) {
         val ch = ensureChannel() ?: run {
             onDone?.invoke()
             return
         }
-        val safeName = userName.trim().ifEmpty { "Receiver" }
-        val record = mapOf("name" to safeName)
+        val safeName = userName.trim().ifEmpty { "Big Share User" }
+        val record = mapOf(
+            "name" to safeName,
+            "avatar" to avatarIndex.coerceIn(0, 9).toString()
+        )
         val info = WifiP2pDnsSdServiceInfo.newInstance(SERVICE_INSTANCE, SERVICE_TYPE, record)
         localServiceInfo = info
 
@@ -319,15 +336,26 @@ class WifiDirectManager(private val context: Context) {
     fun discoverMiniShareServices() {
         val ch = ensureChannel() ?: return
         val txtListener = WifiP2pManager.DnsSdTxtRecordListener { _, record, device ->
-            val name = record["name"]
+            val name = record["name"]?.trim()
+            val avatar = record["avatar"]?.toIntOrNull()?.coerceIn(0, 9)
+            var updated = false
             if (!name.isNullOrBlank()) {
                 servicePeerNames[device.deviceAddress] = name
+                updated = true
+            }
+            if (avatar != null) {
+                servicePeerAvatars[device.deviceAddress] = avatar
+                updated = true
+            }
+            if (updated) {
                 servicePeers[device.deviceAddress] = device
                 publishMergedPeers()
             }
         }
         val servListener = WifiP2pManager.DnsSdServiceResponseListener { instanceName, _, resourceType ->
-            if (instanceName.equals(SERVICE_INSTANCE, ignoreCase = true)) {
+            if (instanceName.equals(SERVICE_INSTANCE, ignoreCase = true) ||
+                instanceName.equals(LEGACY_SERVICE_INSTANCE, ignoreCase = true)
+            ) {
                 servicePeers[resourceType.deviceAddress] = resourceType
                 publishMergedPeers()
             }
@@ -448,6 +476,9 @@ class WifiDirectManager(private val context: Context) {
         systemPeers.clear()
         servicePeers.clear()
         servicePeerNames.clear()
+        servicePeerAvatars.clear()
+        _peerUserNames.value = emptyMap()
+        _peerAvatars.value = emptyMap()
         _peers.value = emptyList()
     }
 

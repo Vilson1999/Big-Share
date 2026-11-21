@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.wifi.p2p.WifiP2pDevice
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,8 +49,11 @@ import com.example.ui.components.atmosphericGlow
 @Composable
 fun RadarScreen(
     peers: List<WifiP2pDevice>,
+    peerUserNames: Map<String, String> = emptyMap(),
+    peerAvatars: Map<String, Int> = emptyMap(),
     selectedFiles: List<FileItem>,
     isScanning: Boolean,
+    userName: String = "",
     userAvatarIndex: Int = 0,
     connectingDeviceAddress: String? = null,
     onBackClick: () -> Unit,
@@ -61,6 +67,7 @@ fun RadarScreen(
     val totalFormattedSize = remember(totalSizeBytes) {
         formatBytes(totalSizeBytes)
     }
+    val fileCountLabel = if (selectedFiles.size == 1) "1 FILE" else "${selectedFiles.size} FILES"
 
     Box(
         modifier = Modifier
@@ -71,25 +78,48 @@ fun RadarScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             AppTopBar(
-                title = "Nearby Devices",
-                subtitle = "${selectedFiles.size} FILES • $totalFormattedSize",
+                title = userName.ifBlank { "Big Share User" },
                 onBackClick = onBackClick,
                 actions = {
-                    IconButton(
-                        onClick = onRescanClick,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(colors.surfaceVariant)
-                            .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
-                            .testTag("rescan_button")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = AppIcons.Refresh,
-                            contentDescription = "Rescan",
-                            tint = colors.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(colors.primary.copy(alpha = 0.16f))
+                                .border(1.dp, colors.primary.copy(alpha = 0.45f), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("radar_files_summary_pill"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "$fileCountLabel • $totalFormattedSize",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primary,
+                                maxLines = 1
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onRescanClick,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(colors.surfaceVariant)
+                                .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
+                                .testTag("rescan_button")
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.Refresh,
+                                contentDescription = "Rescan",
+                                tint = colors.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             )
@@ -150,7 +180,7 @@ fun RadarScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "DISCOVERED DEVICES",
+                    text = "NEARBY USERS",
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.onSurfaceVariant
                 )
@@ -188,13 +218,13 @@ fun RadarScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = if (isScanning) "Searching for nearby receivers..." else "No devices found yet",
+                                text = if (isScanning) "Searching for nearby receivers..." else "No users found yet",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = colors.onSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Ask the other device to tap Receive.",
+                                text = "Ask the other person to tap Receive.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.onSurfaceVariant
                             )
@@ -202,8 +232,13 @@ fun RadarScreen(
                     }
                 } else {
                     itemsIndexed(peers) { index, device ->
+                        val resolvedUserName = peerUserNames[device.deviceAddress]
+                            ?.takeIf { it.isNotBlank() }
+                            ?: "Big Share User"
+                        val resolvedAvatarIndex = peerAvatars[device.deviceAddress]
                         DeviceItemCard(
-                            device = device,
+                            displayName = resolvedUserName,
+                            avatarIndex = resolvedAvatarIndex,
                             isConnecting = connectingDeviceAddress == device.deviceAddress,
                             testTag = "connect_device_button_$index",
                             onConnectClick = { onDeviceClick(device) }
@@ -217,7 +252,8 @@ fun RadarScreen(
 
 @Composable
 private fun DeviceItemCard(
-    device: WifiP2pDevice,
+    displayName: String,
+    avatarIndex: Int?,
     isConnecting: Boolean,
     testTag: String,
     onConnectClick: () -> Unit
@@ -246,25 +282,34 @@ private fun DeviceItemCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(48.dp)
+                    .clip(CircleShape)
                     .background(colors.primary.copy(alpha = 0.14f))
-                    .border(1.dp, colors.primary.copy(alpha = 0.35f), RoundedCornerShape(14.dp)),
+                    .border(1.5.dp, colors.primary.copy(alpha = 0.55f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = AppIcons.Devices,
-                    contentDescription = null,
-                    tint = colors.primary,
-                    modifier = Modifier.size(22.dp)
-                )
+                if (avatarIndex != null) {
+                    Image(
+                        painter = painterResource(id = UserAvatarCatalog.getDrawableRes(avatarIndex)),
+                        contentDescription = displayName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = AppIcons.Person,
+                        contentDescription = displayName,
+                        tint = colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
             Column {
                 Text(
-                    text = if (device.deviceName.isNullOrBlank()) "Android Device" else device.deviceName,
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.onSurface,
                     maxLines = 1,
@@ -272,7 +317,7 @@ private fun DeviceItemCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = device.deviceAddress,
+                    text = "Tap to send files",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.onSurfaceVariant
                 )

@@ -24,6 +24,7 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
     assertEquals("Big Share", appName)
+    assertEquals("com.big.share", context.packageName)
   }
 
   @Test

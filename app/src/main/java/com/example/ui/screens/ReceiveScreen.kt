@@ -101,7 +101,7 @@ fun ReceiveScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = userName.ifBlank { thisDevice?.deviceName ?: "Receiver" },
+                                text = userName.ifBlank { "Big Share User" },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = colors.onSurface,
                                 fontWeight = FontWeight.Bold

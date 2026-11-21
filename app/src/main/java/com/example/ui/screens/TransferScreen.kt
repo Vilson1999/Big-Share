@@ -46,7 +46,6 @@ import com.example.model.TransferStats
 import com.example.model.TransferStatus
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
-import com.example.ui.components.KeepScreenOnEffect
 import com.example.ui.components.atmosphericGlow
 import com.example.ui.components.getFileIcon
 
@@ -61,8 +60,6 @@ fun TransferScreen(
     onCancelAll: () -> Unit,
     onDone: () -> Unit
 ) {
-    KeepScreenOnEffect()
-
     val colors = MaterialTheme.colorScheme
     val primaryAccent = if (direction == TransferDirection.SEND) colors.primary else colors.secondary
     val animatedProgress by animateFloatAsState(

@@ -11,7 +11,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.wifishare.p2pdrop"
+    applicationId = "com.big.share"
     minSdk = 28
     targetSdk = 36
     versionCode = 1
