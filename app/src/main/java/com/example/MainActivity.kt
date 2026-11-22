@@ -287,9 +287,11 @@ fun MainAppContent(
     val pickerImages by viewModel.pickerImages.collectAsStateWithLifecycle()
     val pickerVideos by viewModel.pickerVideos.collectAsStateWithLifecycle()
     val pickerMusic by viewModel.pickerMusic.collectAsStateWithLifecycle()
+    val pickerFiles by viewModel.pickerFiles.collectAsStateWithLifecycle()
     val pickerInstalledApps by viewModel.pickerInstalledApps.collectAsStateWithLifecycle()
     val pickerApkFiles by viewModel.pickerApkFiles.collectAsStateWithLifecycle()
     val isScanningMedia by viewModel.isScanningMedia.collectAsStateWithLifecycle()
+    val isScanningFiles by viewModel.isScanningFiles.collectAsStateWithLifecycle()
     val isScanningApps by viewModel.isScanningApps.collectAsStateWithLifecycle()
     val hasMediaPermission by viewModel.hasMediaPermission.collectAsStateWithLifecycle()
 
@@ -533,9 +535,11 @@ fun MainAppContent(
                         images = pickerImages,
                         videos = pickerVideos,
                         music = pickerMusic,
+                        files = pickerFiles,
                         installedApps = pickerInstalledApps,
                         apkFiles = pickerApkFiles,
                         isScanningMedia = isScanningMedia,
+                        isScanningFiles = isScanningFiles,
                         isScanningApps = isScanningApps,
                         hasMediaPermission = hasMediaPermission,
                         onEnsureLoaded = { viewModel.ensurePickerFilesLoaded() },

@@ -77,6 +77,8 @@ import com.example.picker.toFileItem
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.atmosphericGlow
+import com.example.ui.theme.AmberGold
+import com.example.ui.theme.DeepAmber
 import com.example.ui.theme.DeepCyan
 import com.example.ui.theme.DeepViolet
 import com.example.ui.theme.ElectricBlue
@@ -108,9 +110,11 @@ fun FilePickerScreen(
     images: List<PickerMediaItem>,
     videos: List<PickerMediaItem>,
     music: List<PickerMediaItem>,
+    files: List<PickerMediaItem> = emptyList(),
     installedApps: List<PickerAppItem>,
     apkFiles: List<PickerAppItem>,
     isScanningMedia: Boolean,
+    isScanningFiles: Boolean = false,
     isScanningApps: Boolean,
     hasMediaPermission: Boolean,
     onEnsureLoaded: () -> Unit,
@@ -188,7 +192,7 @@ fun FilePickerScreen(
                 }
             )
 
-            // 4-Category Pill Icon Menu (Image, Video, Music, Apps)
+            // 5-Category Pill Icon Menu (Image, Video, Music, Files, Apps)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -203,12 +207,14 @@ fun FilePickerScreen(
                         PickerCategory.IMAGE -> images.size
                         PickerCategory.VIDEO -> videos.size
                         PickerCategory.MUSIC -> music.size
+                        PickerCategory.FILES -> files.size
                         PickerCategory.APPS -> installedApps.size + apkFiles.size
                     }
                     val icon = when (category) {
                         PickerCategory.IMAGE -> AppIcons.Image
                         PickerCategory.VIDEO -> AppIcons.Movie
                         PickerCategory.MUSIC -> AppIcons.MusicNote
+                        PickerCategory.FILES -> AppIcons.Description
                         PickerCategory.APPS -> AppIcons.Apps
                     }
 
@@ -216,6 +222,7 @@ fun FilePickerScreen(
                         PickerCategory.IMAGE -> DeepCyan to ElectricBlue
                         PickerCategory.VIDEO -> RoseLight to RoseRed
                         PickerCategory.MUSIC -> DeepViolet to ElectricViolet
+                        PickerCategory.FILES -> DeepAmber to AmberGold
                         PickerCategory.APPS -> EmeraldLight to EmeraldGreen
                     }
 
@@ -236,6 +243,7 @@ fun FilePickerScreen(
                 PickerCategory.IMAGE -> isScanningMedia && images.isNotEmpty()
                 PickerCategory.VIDEO -> isScanningMedia && videos.isNotEmpty()
                 PickerCategory.MUSIC -> isScanningMedia && music.isNotEmpty()
+                PickerCategory.FILES -> isScanningFiles && files.isNotEmpty()
                 PickerCategory.APPS -> isScanningApps && (installedApps.isNotEmpty() || apkFiles.isNotEmpty())
             }
             if (showStreamingBar) {
@@ -386,6 +394,61 @@ fun FilePickerScreen(
                                             if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
                                         }
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    PickerCategory.FILES -> {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            when {
+                                isScanningFiles && files.isEmpty() -> {
+                                    ScanningIndicator("Scanning all folders for files...")
+                                }
+                                files.isEmpty() && !hasMediaPermission && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> {
+                                    MediaPermissionPrompt(
+                                        categoryLabel = "Files",
+                                        onGrantClick = {
+                                            onExternalPermissionLaunch()
+                                            mediaPermissionLauncher.launch(getMediaScanPermissions())
+                                        },
+                                        onBrowseClick = onSystemBrowseClick
+                                    )
+                                }
+                                files.isEmpty() -> {
+                                    EmptyPickerState(
+                                        icon = AppIcons.Description,
+                                        title = "No files found",
+                                        subtitle = "Use Browse in the top right to pick documents or archives."
+                                    )
+                                }
+                                else -> {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .testTag("picker_files_list"),
+                                        contentPadding = PaddingValues(
+                                            start = 16.dp,
+                                            end = 16.dp,
+                                            top = 4.dp,
+                                            bottom = if (totalSelectedCount > 0) 96.dp else 16.dp
+                                        ),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(files, key = { it.id }) { item ->
+                                            val isItemSelected = selectedMedia.containsKey(item.id)
+                                            MediaListRow(
+                                                item = item,
+                                                icon = fileIconForName(item.name),
+                                                accentColor = AmberGold,
+                                                showArtist = false,
+                                                isSelected = isItemSelected,
+                                                onClick = {
+                                                    if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1116,5 +1179,13 @@ private fun MediaPermissionPrompt(
                 Text("Browse", style = MaterialTheme.typography.labelLarge)
             }
         }
+    }
+}
+
+private fun fileIconForName(fileName: String): androidx.compose.ui.graphics.vector.ImageVector {
+    return when (fileName.substringAfterLast('.', "").lowercase()) {
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> AppIcons.FolderZip
+        "pdf", "doc", "docx", "txt", "md", "csv", "xls", "xlsx", "ppt", "pptx", "rtf", "epub" -> AppIcons.Description
+        else -> AppIcons.InsertDriveFile
     }
 }

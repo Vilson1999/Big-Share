@@ -1,10 +1,23 @@
-name: Build Mini Share APKs (ARMv7 & ARMv8)
+name: Build Big Share APKs (ARMv7 & ARMv8)
 
 on:
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      new_features:
+        description: 'New Features (optional, auto-detected from commits if blank)'
+        required: false
+        type: string
+      fixes:
+        description: 'Fixes (optional, auto-detected from commits if blank)'
+        required: false
+        type: string
+      improvements:
+        description: 'Improvements (optional, auto-detected from commits if blank)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -17,6 +30,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -81,7 +96,7 @@ jobs:
               -alias upload \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$DEFAULT_PASS" -keypass "$DEFAULT_PASS" \
-              -dname "CN=Vilson Sonkar, O=Mini Share, C=IN"
+              -dname "CN=Vilson Sonkar, O=Big Share, C=IN"
             echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> "$GITHUB_ENV"
             echo "STORE_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
@@ -90,8 +105,12 @@ jobs:
       - name: Build Separate ARMv7 & ARMv8 Release APKs
         run: gradle :app:assembleRelease -PsplitApk --no-daemon
 
-      - name: Prepare APK Artifacts & Measure Sizes
+      - name: Prepare APK Artifacts, Sizes & Release Notes
         id: apks
+        env:
+          INPUT_NEW_FEATURES: ${{ inputs.new_features }}
+          INPUT_FIXES: ${{ inputs.fixes }}
+          INPUT_IMPROVEMENTS: ${{ inputs.improvements }}
         run: |
           mkdir -p "${{ github.workspace }}/release-apks"
           ARMV7_SRC=$(find app/build/outputs/apk/release -name "*armeabi-v7a*.apk" | head -n 1)
@@ -120,6 +139,82 @@ jobs:
           fi
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            COMMIT_RANGE="${PREV_TAG}..HEAD"
+          else
+            COMMIT_RANGE="-n 15"
+          fi
+
+          NEW_FEATURES_LIST=""
+          FIXES_LIST=""
+          IMPROVEMENTS_LIST=""
+
+          while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            lower=$(printf '%s' "$msg" | tr '[:upper:]' '[:lower:]')
+            case "$lower" in
+              feat*|add*|new*|support*|implement*)
+                NEW_FEATURES_LIST="${NEW_FEATURES_LIST}- ${msg}"$'\n'
+                ;;
+              fix*|bug*|hotfix*|patch*|resolve*|crash*)
+                FIXES_LIST="${FIXES_LIST}- ${msg}"$'\n'
+                ;;
+              *)
+                IMPROVEMENTS_LIST="${IMPROVEMENTS_LIST}- ${msg}"$'\n'
+                ;;
+            esac
+          done < <(git log $COMMIT_RANGE --no-merges --pretty=format:"%s" 2>/dev/null || true)
+
+          if [ -n "$INPUT_NEW_FEATURES" ]; then
+            NEW_FEATURES_LIST="- ${INPUT_NEW_FEATURES}"$'\n'
+          elif [ -z "$NEW_FEATURES_LIST" ]; then
+            NEW_FEATURES_LIST="- No new features added in this release."$'\n'
+          fi
+
+          if [ -n "$INPUT_FIXES" ]; then
+            FIXES_LIST="- ${INPUT_FIXES}"$'\n'
+          elif [ -z "$FIXES_LIST" ]; then
+            FIXES_LIST="- No bug fixes recorded in this release."$'\n'
+          fi
+
+          if [ -n "$INPUT_IMPROVEMENTS" ]; then
+            IMPROVEMENTS_LIST="- ${INPUT_IMPROVEMENTS}"$'\n'
+          elif [ -z "$IMPROVEMENTS_LIST" ]; then
+            IMPROVEMENTS_LIST="- General stability, performance, and build improvements."$'\n'
+          fi
+
+          NOTES_FILE="${{ github.workspace }}/release-apks/release-notes.md"
+          {
+            echo "## Big Share (${RELEASE_TAG})"
+            echo ""
+            echo "### App Details"
+            echo "- **App Name:** Big Share"
+            echo "- **Package ID:** \`com.big.share\`"
+            echo "- **Developer:** Vilson Sonkar"
+            echo "- **Supported Android:** Android 9.0 (API 28) – Android 16 (API 36)"
+            echo "- **Connectivity:** Offline Wi-Fi Direct P2P & Bluetooth discovery (no internet required)"
+            echo "- **Core Capabilities:**"
+            echo "  - Built-in picker for Images, Videos, Music, Installed Apps, APKs, and System Files"
+            echo "  - Direct sharing from Android's system Share menu"
+            echo "  - Live transfer progress, speed, and remaining time tracking with per-file cancellation"
+            echo "  - Custom local profile (display name & avatar) and saving received files to Downloads"
+            echo ""
+            echo "| Architecture | APK File | Size |"
+            echo "|---|---|---|"
+            echo "| ARMv7 (\`armeabi-v7a\`) | \`MiniShare-armv7-armeabi-v7a.apk\` | ${ARMV7_SIZE} |"
+            echo "| ARMv8 (\`arm64-v8a\`) | \`MiniShare-armv8-arm64-v8a.apk\` | ${ARMV8_SIZE} |"
+            echo ""
+            echo "### New Features"
+            printf '%s' "$NEW_FEATURES_LIST"
+            echo ""
+            echo "### Fixes"
+            printf '%s' "$FIXES_LIST"
+            echo ""
+            echo "### Improvements"
+            printf '%s' "$IMPROVEMENTS_LIST"
+          } > "$NOTES_FILE"
+
       - name: Upload ARMv7 APK Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -132,44 +227,25 @@ jobs:
           name: MiniShare-armv8-apk
           path: release-apks/MiniShare-armv8-arm64-v8a.apk
 
-      - name: Publish GitHub Release with Direct Download Links
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.apks.outputs.release_tag }}"
-          REPO="${{ github.repository }}"
           ARMV7_FILE="release-apks/MiniShare-armv7-armeabi-v7a.apk"
           ARMV8_FILE="release-apks/MiniShare-armv8-arm64-v8a.apk"
-
-          NOTES=$(cat <<EOF
-          ### Direct APK Downloads
-          - **ARMv7 (\`armeabi-v7a\`)** (${{ steps.apks.outputs.armv7_size }}): https://github.com/${REPO}/releases/download/${TAG}/MiniShare-armv7-armeabi-v7a.apk
-          - **ARMv8 (\`arm64-v8a\`)** (${{ steps.apks.outputs.armv8_size }}): https://github.com/${REPO}/releases/download/${TAG}/MiniShare-armv8-arm64-v8a.apk
-          EOF
-          )
+          NOTES_FILE="release-apks/release-notes.md"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ARMV7_FILE" "$ARMV8_FILE" --clobber
+            gh release edit "$TAG" --notes-file "$NOTES_FILE"
           else
             gh release create "$TAG" "$ARMV7_FILE" "$ARMV8_FILE" \
-              --title "Mini Share $TAG" \
+              --title "Big Share $TAG" \
               --latest \
-              --notes "$NOTES"
+              --notes-file "$NOTES_FILE"
           fi
 
-      - name: Write Direct Download Links to Job Summary
+      - name: Write Release Summary to Job Summary
         run: |
-          TAG="${{ steps.apks.outputs.release_tag }}"
-          REPO="${{ github.repository }}"
-          {
-            echo "## Mini Share APK Build Summary"
-            echo ""
-            echo "| Architecture | File Size | Direct Download Link |"
-            echo "|---|---|---|"
-            echo "| ARMv7 (\`armeabi-v7a\`) | ${{ steps.apks.outputs.armv7_size }} | [Download ARMv7 APK](https://github.com/${REPO}/releases/download/${TAG}/MiniShare-armv7-armeabi-v7a.apk) |"
-            echo "| ARMv8 (\`arm64-v8a\`) | ${{ steps.apks.outputs.armv8_size }} | [Download ARMv8 APK](https://github.com/${REPO}/releases/download/${TAG}/MiniShare-armv8-arm64-v8a.apk) |"
-            echo ""
-            echo "### Always-Latest Direct Links"
-            echo "- ARMv7: \`https://github.com/${REPO}/releases/latest/download/MiniShare-armv7-armeabi-v7a.apk\`"
-            echo "- ARMv8: \`https://github.com/${REPO}/releases/latest/download/MiniShare-armv8-arm64-v8a.apk\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          cat release-apks/release-notes.md >> "$GITHUB_STEP_SUMMARY"

@@ -10,6 +10,8 @@ val ElectricViolet = Color(0xFFA855F7)
 val DeepViolet = Color(0xFF7C3AED)
 val EmeraldGreen = Color(0xFF10B981)
 val RoseRed = Color(0xFFF43F5E)
+val AmberGold = Color(0xFFF59E0B)
+val DeepAmber = Color(0xFFD97706)
 
 // Dark Palette (Atmospheric Obsidian Slate)
 val BackgroundDark = Color(0xFF070B14)

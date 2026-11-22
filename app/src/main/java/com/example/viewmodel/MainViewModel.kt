@@ -78,8 +78,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var discoveryJob: Job? = null
     private var connectTimeoutJob: Job? = null
     private var mediaPreloadJob: Job? = null
+    private var filesPreloadJob: Job? = null
     private var appsPreloadJob: Job? = null
     private var hasCompletedMediaScan = false
+    private var hasCompletedFilesScan = false
     private var hasCompletedAppsScan = false
 
     private val _pickerImages = MutableStateFlow<List<PickerMediaItem>>(emptyList())
@@ -91,6 +93,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pickerMusic = MutableStateFlow<List<PickerMediaItem>>(emptyList())
     val pickerMusic: StateFlow<List<PickerMediaItem>> = _pickerMusic.asStateFlow()
 
+    private val _pickerFiles = MutableStateFlow<List<PickerMediaItem>>(emptyList())
+    val pickerFiles: StateFlow<List<PickerMediaItem>> = _pickerFiles.asStateFlow()
+
     private val _pickerInstalledApps = MutableStateFlow<List<PickerAppItem>>(emptyList())
     val pickerInstalledApps: StateFlow<List<PickerAppItem>> = _pickerInstalledApps.asStateFlow()
 
@@ -99,6 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isScanningMedia = MutableStateFlow(false)
     val isScanningMedia: StateFlow<Boolean> = _isScanningMedia.asStateFlow()
+
+    private val _isScanningFiles = MutableStateFlow(false)
+    val isScanningFiles: StateFlow<Boolean> = _isScanningFiles.asStateFlow()
 
     private val _isScanningApps = MutableStateFlow(false)
     val isScanningApps: StateFlow<Boolean> = _isScanningApps.asStateFlow()
@@ -175,11 +183,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun preloadDeviceFilesOnStartup() {
         ensureAppsAndApksLoaded(forceRefresh = false)
+        ensureFilesLoaded(forceRefresh = false)
         refreshMediaPermissionAndLoad(forceRefresh = false)
     }
 
     fun ensurePickerFilesLoaded() {
         ensureAppsAndApksLoaded(forceRefresh = false)
+        ensureFilesLoaded(forceRefresh = false)
         refreshMediaPermissionAndLoad(forceRefresh = false)
     }
 
@@ -190,6 +200,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!granted) return
         if (!wasGranted) {
             ensureAppsAndApksLoaded(forceRefresh = true)
+            ensureFilesLoaded(forceRefresh = true)
         }
         if (!forceRefresh && (hasCompletedMediaScan || mediaPreloadJob?.isActive == true)) return
 
@@ -205,6 +216,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 hasCompletedMediaScan = true
             } finally {
                 _isScanningMedia.value = false
+            }
+        }
+    }
+
+    fun ensureFilesLoaded(forceRefresh: Boolean = false) {
+        if (!forceRefresh && (hasCompletedFilesScan || filesPreloadJob?.isActive == true)) return
+
+        filesPreloadJob?.cancel()
+        filesPreloadJob = viewModelScope.launch {
+            _isScanningFiles.value = true
+            try {
+                DeviceMediaScanner.scanFilesProgressively(getApplication()) { scannedFiles ->
+                    if (!forceRefresh || scannedFiles.isNotEmpty() || !hasCompletedFilesScan) {
+                        _pickerFiles.value = scannedFiles
+                    }
+                }
+                hasCompletedFilesScan = true
+            } finally {
+                _isScanningFiles.value = false
             }
         }
     }
