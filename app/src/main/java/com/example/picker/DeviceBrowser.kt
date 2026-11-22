@@ -315,12 +315,12 @@ object DeviceBrowser {
 
         for (child in children) {
             val name = child.name
-            if (name.startsWith(".")) continue
+            if (name == "." || name == "..") continue
             if (!child.canRead()) continue
 
             if (child.isDirectory) {
                 val count = try {
-                    child.listFiles()?.count { !it.name.startsWith(".") }
+                    child.listFiles()?.count { it.name != "." && it.name != ".." }
                 } catch (_: Exception) {
                     null
                 }
@@ -336,7 +336,7 @@ object DeviceBrowser {
                         file = child
                     )
                 )
-            } else if (child.isFile && child.length() > 0L) {
+            } else if (child.isFile && child.length() >= 0L) {
                 files.add(
                     BrowserEntry(
                         id = "file:${child.absolutePath}",
@@ -385,7 +385,7 @@ object DeviceBrowser {
                     val docId = c.getString(idCol) ?: continue
                     val name = if (nameCol != -1) c.getString(nameCol) else null
                     val cleanName = name?.takeIf { it.isNotBlank() } ?: docId.substringAfterLast('/')
-                    if (cleanName.startsWith(".")) continue
+                    if (cleanName == "." || cleanName == "..") continue
                     val mime = if (mimeCol != -1) c.getString(mimeCol) ?: "application/octet-stream" else "application/octet-stream"
                     val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
                     val size = if (sizeCol != -1 && !c.isNull(sizeCol)) c.getLong(sizeCol) else 0L
@@ -518,7 +518,7 @@ object DeviceBrowser {
         val sorted = children.sortedWith(compareBy<File>({ !it.isDirectory }, { it.name.lowercase() }))
         for (child in sorted) {
             val name = child.name
-            if (name.startsWith(".") || !child.canRead()) continue
+            if (name == "." || name == ".." || !child.canRead()) continue
             if (child.isDirectory) {
                 collectFolderFromFile(
                     dir = child,
@@ -527,7 +527,7 @@ object DeviceBrowser {
                     visited = visited,
                     onFile = onFile
                 )
-            } else if (child.isFile && child.length() > 0L) {
+            } else if (child.isFile && child.length() >= 0L) {
                 onFile(
                     FileItem(
                         id = UUID.randomUUID().toString(),

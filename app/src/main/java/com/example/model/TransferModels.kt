@@ -24,6 +24,18 @@ enum class TransferDirection {
     RECEIVE
 }
 
+enum class AppThemeMode(val key: String, val label: String) {
+    DEFAULT("default", "Default"),
+    DARK("dark", "Dark"),
+    LIGHT("light", "Light");
+
+    companion object {
+        fun fromKey(key: String?): AppThemeMode {
+            return entries.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: DEFAULT
+        }
+    }
+}
+
 data class FileItem(
     val id: String,
     val name: String,

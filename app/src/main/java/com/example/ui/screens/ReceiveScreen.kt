@@ -36,6 +36,7 @@ import com.example.ui.components.atmosphericGlow
 fun ReceiveScreen(
     userName: String,
     userAvatarIndex: Int = 0,
+    receiveLocationLabel: String = "Downloads/Big Share",
     onBackClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -167,7 +168,7 @@ fun ReceiveScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Incoming files save to Downloads/Big Share",
+                        text = "Incoming files save to $receiveLocationLabel",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         fontSize = 12.sp

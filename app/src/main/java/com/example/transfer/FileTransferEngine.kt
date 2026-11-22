@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
 import com.example.model.FileItem
@@ -559,7 +560,8 @@ class FileTransferEngine(private val context: Context) {
     private data class ReceiveDestination(
         val outputStream: OutputStream,
         val mediaUri: Uri? = null,
-        val file: File? = null
+        val file: File? = null,
+        val safDocUri: Uri? = null
     )
 
     internal fun resolveSafeMimeType(fileName: String, rawMime: String): String {
@@ -600,6 +602,10 @@ class FileTransferEngine(private val context: Context) {
         val safeName = sanitizeFileName(fileName)
         val safeFolder = sanitizeRelativeFolder(relativeFolder)
         val safeMime = resolveSafeMimeType(safeName, mimeType)
+
+        // Check if user selected a custom storage folder via OpenDocumentTree
+        createCustomTreeDestination(safeName, safeMime, safeFolder)?.let { return it }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver: ContentResolver = context.contentResolver
@@ -631,8 +637,89 @@ class FileTransferEngine(private val context: Context) {
         return ReceiveDestination(outputStream = FileOutputStream(fallback), file = fallback)
     }
 
+    private fun createCustomTreeDestination(
+        safeName: String,
+        safeMime: String,
+        safeFolder: String
+    ): ReceiveDestination? {
+        val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        val rawTreeUri = prefs.getString("receive_tree_uri", null)?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val treeUri = Uri.parse(rawTreeUri)
+            val resolver = context.contentResolver
+            var parentDocId = DocumentsContract.getTreeDocumentId(treeUri)
+
+            if (safeFolder.isNotEmpty()) {
+                for (segment in safeFolder.split('/')) {
+                    if (segment.isBlank()) continue
+                    parentDocId = findOrCreateSafSubdir(resolver, treeUri, parentDocId, segment)
+                        ?: return null
+                }
+            }
+
+            val parentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
+            val createdUri = DocumentsContract.createDocument(resolver, parentDocUri, safeMime, safeName)
+                ?: return null
+            val stream = resolver.openOutputStream(createdUri)
+            if (stream != null) {
+                ReceiveDestination(outputStream = stream, safDocUri = createdUri)
+            } else {
+                try {
+                    DocumentsContract.deleteDocument(resolver, createdUri)
+                } catch (_: Exception) {}
+                null
+            }
+        } catch (e: Exception) {
+            Log.w("FileTransferEngine", "Custom receive storage unavailable, falling back to Downloads/Big Share", e)
+            null
+        }
+    }
+
+    private fun findOrCreateSafSubdir(
+        resolver: ContentResolver,
+        treeUri: Uri,
+        parentDocId: String,
+        folderName: String
+    ): String? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+        try {
+            resolver.query(childrenUri, projection, null, null, null)?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (c.moveToNext()) {
+                    val mime = if (mimeCol != -1) c.getString(mimeCol) else null
+                    val name = if (nameCol != -1) c.getString(nameCol) else null
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR && name == folderName) {
+                        return c.getString(idCol)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
+        val created = DocumentsContract.createDocument(
+            resolver,
+            parentUri,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            folderName
+        ) ?: return null
+        return DocumentsContract.getDocumentId(created)
+    }
+
     private fun finalizeDestination(destination: ReceiveDestination, success: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && destination.mediaUri != null) {
+        if (destination.safDocUri != null) {
+            if (!success) {
+                try {
+                    DocumentsContract.deleteDocument(context.contentResolver, destination.safDocUri)
+                } catch (_: Exception) {}
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && destination.mediaUri != null) {
             try {
                 if (success) {
                     val values = ContentValues().apply {

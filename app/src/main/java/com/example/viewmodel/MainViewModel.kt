@@ -3,15 +3,18 @@ package com.example.viewmodel
 import android.app.Application
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.model.AppScreen
+import com.example.model.AppThemeMode
 import com.example.model.FileItem
 import com.example.model.TransferDirection
 import com.example.model.TransferStats
@@ -131,9 +134,100 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val userAvatarIndex: StateFlow<Int> = _userAvatarIndex.asStateFlow()
 
+    private val _themeMode = MutableStateFlow(
+        AppThemeMode.fromKey(prefs.getString("app_theme_mode", AppThemeMode.DEFAULT.key))
+    )
+    val themeMode: StateFlow<AppThemeMode> = _themeMode.asStateFlow()
+
+    private val _receiveLocationUri = MutableStateFlow(
+        prefs.getString("receive_tree_uri", null)?.takeIf { it.isNotBlank() }
+    )
+    val receiveLocationUri: StateFlow<String?> = _receiveLocationUri.asStateFlow()
+
+    private val _receiveLocationLabel = MutableStateFlow(
+        prefs.getString("receive_location_label", null)?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_RECEIVE_LOCATION_LABEL
+    )
+    val receiveLocationLabel: StateFlow<String> = _receiveLocationLabel.asStateFlow()
+
     fun openProfile() {
         _transferError.value = null
         _currentScreen.value = AppScreen.PROFILE
+    }
+
+    fun updateThemeMode(mode: AppThemeMode) {
+        _themeMode.value = mode
+        prefs.edit().putString("app_theme_mode", mode.key).apply()
+    }
+
+    fun updateReceiveLocation(context: Context, treeUri: Uri?) {
+        if (treeUri == null) {
+            _receiveLocationUri.value = null
+            _receiveLocationLabel.value = DEFAULT_RECEIVE_LOCATION_LABEL
+            prefs.edit()
+                .remove("receive_tree_uri")
+                .remove("receive_location_label")
+                .apply()
+            return
+        }
+
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+        }
+
+        val resolvedLabel = resolveFolderDisplayLabel(context, treeUri)
+        val uriString = treeUri.toString()
+        _receiveLocationUri.value = uriString
+        _receiveLocationLabel.value = resolvedLabel
+        prefs.edit()
+            .putString("receive_tree_uri", uriString)
+            .putString("receive_location_label", resolvedLabel)
+            .apply()
+    }
+
+    private fun resolveFolderDisplayLabel(context: Context, treeUri: Uri): String {
+        return try {
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+            var displayName: String? = null
+            context.contentResolver.query(
+                docUri,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    displayName = c.getString(0)?.trim()?.takeIf { it.isNotBlank() }
+                }
+            }
+            val volumePrefix = when {
+                docId.startsWith("primary:", ignoreCase = true) -> "Internal"
+                docId.contains(':') -> "External"
+                else -> ""
+            }
+            val rawPath = docId.substringAfter(':', docId).trim('/').ifBlank { displayName ?: "Selected Folder" }
+            val cleanName = displayName ?: rawPath.substringAfterLast('/')
+            if (volumePrefix.isNotEmpty() && !rawPath.equals(cleanName, ignoreCase = true)) {
+                "$volumePrefix / $rawPath"
+            } else if (volumePrefix.isNotEmpty()) {
+                "$volumePrefix / $cleanName"
+            } else {
+                cleanName
+            }
+        } catch (_: Exception) {
+            "Custom Folder"
+        }
     }
 
     fun saveUserProfile(name: String, avatarIndex: Int) {
@@ -148,6 +242,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .putBoolean("profile_completed", true)
             .apply()
         _currentScreen.value = AppScreen.HOME
+    }
+
+    companion object {
+        const val DEFAULT_RECEIVE_LOCATION_LABEL = "Downloads/Big Share"
     }
 
     init {
@@ -188,9 +286,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun ensurePickerFilesLoaded() {
-        ensureAppsAndApksLoaded(forceRefresh = false)
+        ensureAppsAndApksLoaded(forceRefresh = appsPreloadJob?.isActive != true)
         ensureFilesLoaded(forceRefresh = false)
         refreshMediaPermissionAndLoad(forceRefresh = false)
+    }
+
+    fun rescanAppsAndApks() {
+        ensureAppsAndApksLoaded(forceRefresh = true)
     }
 
     fun refreshMediaPermissionAndLoad(forceRefresh: Boolean = false) {

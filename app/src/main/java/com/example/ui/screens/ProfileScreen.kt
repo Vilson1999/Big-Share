@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,8 +16,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -38,13 +44,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.AppThemeMode
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.UserAvatarCatalog
@@ -55,12 +65,26 @@ fun ProfileScreen(
     initialName: String,
     initialAvatarIndex: Int,
     isFirstLaunch: Boolean,
+    themeMode: AppThemeMode = AppThemeMode.DEFAULT,
+    receiveLocationLabel: String = "Downloads/Big Share",
+    hasCustomReceiveLocation: Boolean = false,
+    onThemeModeSelect: (AppThemeMode) -> Unit = {},
+    onReceiveLocationSelected: (Uri?) -> Unit = {},
+    onExternalModalLaunch: () -> Unit = {},
     onBackClick: (() -> Unit)? = null,
     onSaveProfile: (name: String, avatarIndex: Int) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     var nameInput by remember(initialName) { mutableStateOf(initialName) }
     var selectedAvatarIndex by remember(initialAvatarIndex) { mutableIntStateOf(initialAvatarIndex) }
+
+    val storageTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            onReceiveLocationSelected(uri)
+        }
+    }
 
     val selectedAvatar = UserAvatarCatalog.avatars.getOrElse(selectedAvatarIndex) {
         UserAvatarCatalog.avatars.first()
@@ -78,8 +102,12 @@ fun ProfileScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             AppTopBar(
-                title = if (isFirstLaunch) "Create Profile" else "Profile",
-                subtitle = "Choose your photo and name",
+                title = if (isFirstLaunch) "Create Profile" else "Profile & Settings",
+                subtitle = if (isFirstLaunch) {
+                    "Choose your photo, name, and preferences"
+                } else {
+                    "Profile, storage & theme settings"
+                },
                 onBackClick = if (isFirstLaunch) null else onBackClick
             )
 
@@ -236,6 +264,196 @@ fun ProfileScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(26.dp))
+
+                // Storage Location Setting
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "RECEIVE STORAGE LOCATION",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfaceVariant)
+                            .border(1.dp, colors.outline, RoundedCornerShape(16.dp))
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colors.primary.copy(alpha = 0.14f))
+                                    .border(
+                                        1.dp,
+                                        colors.primary.copy(alpha = 0.3f),
+                                        RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = AppIcons.FolderOpen,
+                                    contentDescription = "Receive storage folder",
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Received files save to",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = receiveLocationLabel,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("storage_location_label")
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    onExternalModalLaunch()
+                                    storageTreeLauncher.launch(null)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.primaryContainer,
+                                    contentColor = colors.onPrimaryContainer
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("choose_storage_location_button")
+                            ) {
+                                Text(
+                                    text = if (hasCustomReceiveLocation) "Change Folder" else "Choose Folder",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            if (hasCustomReceiveLocation) {
+                                OutlinedButton(
+                                    onClick = { onReceiveLocationSelected(null) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = colors.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("reset_storage_location_button")
+                                ) {
+                                    Text(
+                                        text = "Default",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                // Theme Setting (Default, Dark, Light)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "THEME",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.surfaceVariant)
+                            .border(1.dp, colors.outline, RoundedCornerShape(16.dp))
+                            .padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AppThemeMode.entries.forEach { mode ->
+                            val isSelected = mode == themeMode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) colors.primaryContainer else colors.surface
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable(
+                                        role = Role.RadioButton,
+                                        onClickLabel = "Select ${mode.label} theme"
+                                    ) {
+                                        onThemeModeSelect(mode)
+                                    }
+                                    .semantics {
+                                        selected = isSelected
+                                    }
+                                    .testTag("theme_option_${mode.key}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = AppIcons.Check,
+                                            contentDescription = null,
+                                            tint = colors.onPrimaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    Text(
+                                        text = mode.label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) {
+                                            colors.onPrimaryContainer
+                                        } else {
+                                            colors.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -275,3 +493,4 @@ fun ProfileScreen(
         }
     }
 }
+

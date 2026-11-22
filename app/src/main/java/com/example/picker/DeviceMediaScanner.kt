@@ -16,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.storage.StorageManager
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.LruCache
 import android.util.Size
@@ -30,11 +31,11 @@ import java.io.File
 import java.util.UUID
 
 enum class PickerCategory(val label: String) {
+    APPS("Apps"),
     IMAGE("Image"),
     VIDEO("Video"),
     MUSIC("Music"),
-    FILES("Files"),
-    APPS("Apps")
+    FILES("Files")
 }
 
 data class PickerMediaItem(
@@ -476,8 +477,14 @@ object DeviceMediaScanner {
             emitSnapshot(force = true)
         }
 
-        // 3. Auto-scan all accessible folders across internal storage and SD cards for .apk files
+        // 3. Auto-scan all accessible folders across internal storage, SD cards, and USB drives for .apk files
         scanApkStorageRootsFallback(context, apks, seenApkPaths, seenApkSig) {
+            emitSnapshot(force = false)
+        }
+        emitSnapshot(force = true)
+
+        // 4. Scan all persisted SAF trees (Internal Storage / SD Card / USB OTG granted via folder picker)
+        scanPersistedSafTreesForApks(context, apks, seenApkPaths, seenApkSig) {
             emitSnapshot(force = false)
         }
 
@@ -501,19 +508,23 @@ object DeviceMediaScanner {
             }
             add(MediaStore.Files.getContentUri(volume))
         }
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.TITLE,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.MIME_TYPE,
-            MediaStore.MediaColumns.DATA
-        )
+        val projection = buildList {
+            add(MediaStore.MediaColumns._ID)
+            add(MediaStore.MediaColumns.DISPLAY_NAME)
+            add(MediaStore.MediaColumns.TITLE)
+            add(MediaStore.MediaColumns.SIZE)
+            add(MediaStore.MediaColumns.MIME_TYPE)
+            add(MediaStore.MediaColumns.DATA)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(MediaStore.MediaColumns.RELATIVE_PATH)
+            }
+        }.toTypedArray()
+
         val filteredSelection =
             "${MediaStore.MediaColumns.SIZE} > 0 AND (" +
                 "${MediaStore.MediaColumns.MIME_TYPE} = 'application/vnd.android.package-archive' OR " +
                 "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.apk' OR " +
-                "${MediaStore.MediaColumns.DATA} LIKE '%.apk')"
+                "${MediaStore.MediaColumns.TITLE} LIKE '%.apk')"
 
         for (collection in collections) {
             val cursor = try {
@@ -528,7 +539,14 @@ object DeviceMediaScanner {
                 try {
                     context.contentResolver.query(
                         collection,
-                        projection,
+                        arrayOf(
+                            MediaStore.MediaColumns._ID,
+                            MediaStore.MediaColumns.DISPLAY_NAME,
+                            MediaStore.MediaColumns.TITLE,
+                            MediaStore.MediaColumns.SIZE,
+                            MediaStore.MediaColumns.MIME_TYPE,
+                            MediaStore.MediaColumns.DATA
+                        ),
                         "${MediaStore.MediaColumns.SIZE} > 0",
                         null,
                         "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
@@ -593,6 +611,128 @@ object DeviceMediaScanner {
         }
     }
 
+    private fun scanPersistedSafTreesForApks(
+        context: Context,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>,
+        onItemAdded: () -> Unit = {}
+    ) {
+        val treeUris = try {
+            context.contentResolver.persistedUriPermissions
+                .filter { it.isReadPermission }
+                .map { it.uri }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (treeUris.isEmpty()) return
+
+        for (treeUri in treeUris) {
+            val rootDocId = try {
+                DocumentsContract.getTreeDocumentId(treeUri)
+            } catch (_: Exception) {
+                continue
+            }
+            val visitedDocs = HashSet<String>()
+            walkSafApkTree(
+                context = context,
+                treeUri = treeUri,
+                parentDocId = rootDocId,
+                depth = 0,
+                out = out,
+                seenPaths = seenPaths,
+                seenSig = seenSig,
+                visitedDocs = visitedDocs,
+                onItemAdded = onItemAdded
+            )
+        }
+    }
+
+    private fun walkSafApkTree(
+        context: Context,
+        treeUri: Uri,
+        parentDocId: String,
+        depth: Int,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>,
+        visitedDocs: MutableSet<String>,
+        onItemAdded: () -> Unit = {}
+    ) {
+        if (depth > 16) return
+        if (!visitedDocs.add(parentDocId)) return
+
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE
+        )
+
+        try {
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (c.moveToNext()) {
+                    val docId = c.getString(idCol) ?: continue
+                    val rawName = if (nameCol != -1) c.getString(nameCol) else null
+                    val name = rawName?.takeIf { it.isNotBlank() } ?: docId.substringAfterLast('/')
+                    if (name == "." || name == "..") continue
+                    val mime = if (mimeCol != -1) c.getString(mimeCol).orEmpty() else ""
+                    val size = if (sizeCol != -1 && !c.isNull(sizeCol)) c.getLong(sizeCol) else 0L
+
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        val lowerDoc = docId.lowercase()
+                        if (lowerDoc.endsWith("/android/data") || lowerDoc.endsWith("/android/obb") ||
+                            lowerDoc.endsWith(":android/data") || lowerDoc.endsWith(":android/obb")
+                        ) {
+                            continue
+                        }
+                        walkSafApkTree(
+                            context = context,
+                            treeUri = treeUri,
+                            parentDocId = docId,
+                            depth = depth + 1,
+                            out = out,
+                            seenPaths = seenPaths,
+                            seenSig = seenSig,
+                            visitedDocs = visitedDocs,
+                            onItemAdded = onItemAdded
+                        )
+                    } else if (size > 0L && (name.endsWith(".apk", ignoreCase = true) ||
+                            mime.equals("application/vnd.android.package-archive", ignoreCase = true))
+                    ) {
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                        val key = docUri.toString()
+                        val fileName = if (name.endsWith(".apk", ignoreCase = true)) name else "$name.apk"
+                        val sig = "apk:${fileName.lowercase()}_${size}"
+                        if (seenPaths.add(key) && seenSig.add(sig)) {
+                            out.add(
+                                PickerAppItem(
+                                    id = "apksaf:$treeUri:$docId",
+                                    packageName = "",
+                                    appName = fileName.removeSuffix(".apk").removeSuffix(".APK"),
+                                    versionName = "",
+                                    apkPath = "",
+                                    uriString = key,
+                                    sizeBytes = size,
+                                    isStandaloneApk = true,
+                                    fileNameOverride = fileName
+                                )
+                            )
+                            onItemAdded()
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private fun scanApkStorageRootsFallback(
         context: Context,
         out: MutableList<PickerAppItem>,
@@ -607,26 +747,29 @@ object DeviceMediaScanner {
             if (downloads != null && downloads.exists() && downloads.canRead()) {
                 val bigShareDir = File(downloads, "Big Share")
                 if (bigShareDir.exists() && bigShareDir.canRead()) {
-                    priorityDirs[bigShareDir.absolutePath] = bigShareDir
+                    priorityDirs[canonicalDirKey(bigShareDir)] = bigShareDir
                 }
-                priorityDirs[downloads.absolutePath] = downloads
+                priorityDirs[canonicalDirKey(downloads)] = downloads
             }
         } catch (_: Exception) {}
         try {
             @Suppress("DEPRECATION")
             val documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
             if (documents != null && documents.exists() && documents.canRead()) {
-                priorityDirs[documents.absolutePath] = documents
+                priorityDirs[canonicalDirKey(documents)] = documents
             }
         } catch (_: Exception) {}
 
-        val commonApkSubdirs = listOf("Download", "Downloads", "APKs", "Apk", "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp", "Android/media")
+        val commonApkSubdirs = listOf(
+            "Download", "Downloads", "APKs", "Apk", "App", "Apps", "Backup", "Backups",
+            "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp", "Android/media"
+        )
         val roots = collectStorageRoots(context)
         for (rootDir in roots) {
             for (sub in commonApkSubdirs) {
                 val candidate = File(rootDir, sub)
                 if (candidate.exists() && candidate.isDirectory && candidate.canRead()) {
-                    priorityDirs.putIfAbsent(candidate.absolutePath, candidate)
+                    priorityDirs.putIfAbsent(canonicalDirKey(candidate), candidate)
                 }
             }
         }
@@ -658,13 +801,13 @@ object DeviceMediaScanner {
         visitedDirs: MutableSet<String>,
         onItemAdded: () -> Unit = {}
     ) {
-        if (depth > 12) return
+        if (depth > 14) return
         if (!visitedDirs.add(canonicalDirKey(dir))) return
         val children = dir.listFiles() ?: return
         val isAndroidDir = dir.name.equals("Android", ignoreCase = true)
         for (file in children) {
             val name = file.name
-            if (name.startsWith(".")) continue
+            if (name == "." || name == "..") continue
             if (file.isDirectory) {
                 if (isAndroidDir && (name.equals("data", ignoreCase = true) || name.equals("obb", ignoreCase = true))) {
                     continue
@@ -721,8 +864,11 @@ object DeviceMediaScanner {
     private fun getMediaStoreVolumes(context: Context): List<String> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val set = MediaStore.getExternalVolumeNames(context)
-                if (set.isEmpty()) listOf(MediaStore.VOLUME_EXTERNAL_PRIMARY) else set.toList()
+                val volumes = LinkedHashSet<String>()
+                volumes.addAll(MediaStore.getExternalVolumeNames(context))
+                volumes.add(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                volumes.add("external")
+                volumes.toList()
             } catch (_: Exception) {
                 listOf("external")
             }
@@ -922,7 +1068,7 @@ object DeviceMediaScanner {
                             ?: dataPath?.substringAfterLast('/')
                             ?: title
                             ?: continue
-                        if (name.startsWith(".")) continue
+                        if (name == "." || name == "..") continue
                         if (isMediaOrApkFile(name, mime)) continue
 
                         if (!dataPath.isNullOrBlank()) seenPaths.add(dataPath)
@@ -1037,7 +1183,7 @@ object DeviceMediaScanner {
         val isAndroidDir = dir.name.equals("Android", ignoreCase = true)
         for (file in children) {
             val name = file.name
-            if (name.startsWith(".")) continue
+            if (name == "." || name == "..") continue
             if (file.isDirectory) {
                 if (isAndroidDir && (name.equals("data", ignoreCase = true) || name.equals("obb", ignoreCase = true))) {
                     continue
@@ -1123,15 +1269,16 @@ object DeviceMediaScanner {
             }
         } catch (_: Exception) {}
 
-        try {
-            val storageMount = File("/storage")
-            storageMount.listFiles()?.forEach { child ->
-                val name = child.name
-                if (name != "self" && name != "emulated") {
-                    addRoot(child)
+        listOf("/storage", "/mnt/media_rw").forEach { mountBase ->
+            try {
+                File(mountBase).listFiles()?.forEach { child ->
+                    val name = child.name
+                    if (name != "self" && name != "emulated") {
+                        addRoot(child)
+                    }
                 }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
 
         return roots.values.toList()
     }

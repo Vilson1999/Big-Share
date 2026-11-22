@@ -58,6 +58,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.AppScreen
+import com.example.model.AppThemeMode
 import com.example.ui.screens.FilePickerScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ProfileScreen
@@ -85,7 +86,13 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val darkTheme = isSystemInDarkTheme()
+            val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (themeMode) {
+                AppThemeMode.DEFAULT -> systemDark
+                AppThemeMode.DARK -> true
+                AppThemeMode.LIGHT -> false
+            }
             val pendingSharedUris by incomingSharedUris.collectAsStateWithLifecycle()
 
             DisposableEffect(darkTheme) {
@@ -295,6 +302,9 @@ fun MainAppContent(
     val isScanningFiles by viewModel.isScanningFiles.collectAsStateWithLifecycle()
     val isScanningApps by viewModel.isScanningApps.collectAsStateWithLifecycle()
     val hasMediaPermission by viewModel.hasMediaPermission.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val receiveLocationUri by viewModel.receiveLocationUri.collectAsStateWithLifecycle()
+    val receiveLocationLabel by viewModel.receiveLocationLabel.collectAsStateWithLifecycle()
 
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var awaitingExternalModal by remember { mutableStateOf(false) }
@@ -502,6 +512,14 @@ fun MainAppContent(
                         initialName = userName,
                         initialAvatarIndex = userAvatarIndex,
                         isFirstLaunch = !isProfileCompleted,
+                        themeMode = themeMode,
+                        receiveLocationLabel = receiveLocationLabel,
+                        hasCustomReceiveLocation = !receiveLocationUri.isNullOrBlank(),
+                        onThemeModeSelect = { mode -> viewModel.updateThemeMode(mode) },
+                        onReceiveLocationSelected = { treeUri ->
+                            viewModel.updateReceiveLocation(context, treeUri)
+                        },
+                        onExternalModalLaunch = { awaitingExternalModal = true },
                         onBackClick = if (isProfileCompleted) {
                             { viewModel.resetToHome() }
                         } else null,
@@ -572,6 +590,7 @@ fun MainAppContent(
                         onExternalPermissionLaunch = {
                             awaitingExternalModal = true
                         },
+                        onRescanApps = { viewModel.rescanAppsAndApks() },
                         onConfirmSelection = { items ->
                             viewModel.onFileItemsPicked(items)
                         }
@@ -603,6 +622,7 @@ fun MainAppContent(
                     ReceiveScreen(
                         userName = userName,
                         userAvatarIndex = userAvatarIndex,
+                        receiveLocationLabel = receiveLocationLabel,
                         onBackClick = { viewModel.resetToHome() }
                     )
                 }

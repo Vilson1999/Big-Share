@@ -74,7 +74,8 @@ fun FilesBrowserSection(
     bottomPadding: androidx.compose.ui.unit.Dp,
     onExternalPickerLaunch: () -> Unit,
     onGrantMediaPermissionClick: () -> Unit,
-    onBrowseSystemFilesClick: () -> Unit
+    onBrowseSystemFilesClick: () -> Unit,
+    onStorageAccessGranted: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
@@ -106,6 +107,7 @@ fun FilesBrowserSection(
         if (!sessionTreeUris.contains(uri)) {
             sessionTreeUris.add(uri)
         }
+        onStorageAccessGranted()
         scope.launch {
             val updated = DeviceBrowser.discoverStorageRoots(context, sessionTreeUris.toList())
             storageRoots = updated
@@ -538,12 +540,14 @@ private fun BrowserEntryRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(3.dp))
+            val isHiddenEntry = entry.name.startsWith(".")
+            val hiddenPrefix = if (isHiddenEntry) "Hidden • " else ""
             Text(
                 text = if (entry.isDirectory) {
                     val countLabel = entry.childCount?.let { "$it items • " }.orEmpty()
-                    if (isSelected) "${countLabel}Folder selected" else "${countLabel}Tap to open"
+                    if (isSelected) "${hiddenPrefix}${countLabel}Folder selected" else "${hiddenPrefix}${countLabel}Tap to open"
                 } else {
-                    formatBytes(entry.sizeBytes)
+                    "${hiddenPrefix}${formatBytes(entry.sizeBytes)}"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (isSelected && entry.isDirectory) accentColor else colors.onSurfaceVariant,
