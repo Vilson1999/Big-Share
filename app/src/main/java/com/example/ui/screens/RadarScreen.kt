@@ -41,7 +41,7 @@ import com.example.model.FileItem
 import com.example.model.formatBytes
 import com.example.ui.components.AppIcons
 import com.example.ui.components.BackIconButton
-import com.example.ui.components.RadarAnimation
+import com.example.ui.components.PulseAnimation
 import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
 
@@ -120,7 +120,7 @@ fun RadarScreen(
                 }
             }
 
-            // Radar Console Container with big user photo & waves
+            // Pulse Console Container with user photo & expanding waves
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -131,11 +131,11 @@ fun RadarScreen(
                     .border(1.dp, colors.outline, RoundedCornerShape(24.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                RadarAnimation(
+                PulseAnimation(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(8.dp),
-                    radarColor = colors.primary,
+                    pulseColor = colors.primary,
                     avatarDrawableRes = UserAvatarCatalog.getDrawableRes(userAvatarIndex),
                     avatarSize = 112.dp,
                     isActive = isScanning

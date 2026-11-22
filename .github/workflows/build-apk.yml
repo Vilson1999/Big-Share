@@ -78,32 +78,62 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Determine Release Version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            RELEASE_TAG="${{ github.ref_name }}"
+          else
+            RELEASE_TAG="v1.0.${{ github.run_number }}"
+          fi
+          APP_VERSION_NAME="${RELEASE_TAG#v}"
+          APP_VERSION_CODE=$((10 + ${{ github.run_number }}))
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version_name=$APP_VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$APP_VERSION_CODE" >> "$GITHUB_OUTPUT"
+
       - name: Prepare Signing Keystore
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
           SECRET_STORE_PASS: ${{ secrets.STORE_PASSWORD }}
           SECRET_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
+          KEYSTORE_OUT="${{ github.workspace }}/my-upload-key.jks"
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "${{ github.workspace }}/my-upload-key.jks"
-            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> "$GITHUB_ENV"
+            echo "$KEYSTORE_B64" | base64 -d > "$KEYSTORE_OUT"
+            echo "KEYSTORE_PATH=$KEYSTORE_OUT" >> "$GITHUB_ENV"
             echo "STORE_PASSWORD=$SECRET_STORE_PASS" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=$SECRET_KEY_PASS" >> "$GITHUB_ENV"
+          elif [ -f "${{ github.workspace }}/debug.keystore.base64" ]; then
+            echo "Using repository debug.keystore.base64 for consistent signing across app updates."
+            base64 -d "${{ github.workspace }}/debug.keystore.base64" > "$KEYSTORE_OUT"
+            keytool -changealias -noprompt \
+              -keystore "$KEYSTORE_OUT" \
+              -alias androiddebugkey \
+              -destalias upload \
+              -storepass android
+            echo "KEYSTORE_PATH=$KEYSTORE_OUT" >> "$GITHUB_ENV"
+            echo "STORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
           else
             DEFAULT_PASS="minishare_release_key"
             keytool -genkeypair -noprompt \
-              -keystore "${{ github.workspace }}/my-upload-key.jks" \
+              -keystore "$KEYSTORE_OUT" \
               -alias upload \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$DEFAULT_PASS" -keypass "$DEFAULT_PASS" \
               -dname "CN=Vilson Sonkar, O=Big Share, C=IN"
-            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PATH=$KEYSTORE_OUT" >> "$GITHUB_ENV"
             echo "STORE_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
           fi
 
       - name: Build Separate ARMv7 & ARMv8 Release APKs
-        run: gradle :app:assembleRelease -PsplitApk --no-daemon
+        run: |
+          gradle :app:assembleRelease -PsplitApk \
+            -PappVersionCode="${{ steps.version.outputs.version_code }}" \
+            -PappVersionName="${{ steps.version.outputs.version_name }}" \
+            --no-daemon
 
       - name: Prepare APK Artifacts, Sizes & Release Notes
         id: apks
@@ -132,11 +162,9 @@ jobs:
           echo "armv7_size=$ARMV7_SIZE" >> "$GITHUB_OUTPUT"
           echo "armv8_size=$ARMV8_SIZE" >> "$GITHUB_OUTPUT"
 
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            RELEASE_TAG="${{ github.ref_name }}"
-          else
-            RELEASE_TAG="v1.0.${{ github.run_number }}"
-          fi
+          RELEASE_TAG="${{ steps.version.outputs.release_tag }}"
+          APP_VERSION_NAME="${{ steps.version.outputs.version_name }}"
+          APP_VERSION_CODE="${{ steps.version.outputs.version_code }}"
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
@@ -191,6 +219,7 @@ jobs:
             echo "### App Details"
             echo "- **App Name:** Big Share"
             echo "- **Package ID:** \`com.big.share\`"
+            echo "- **Version:** ${APP_VERSION_NAME} (Build ${APP_VERSION_CODE})"
             echo "- **Developer:** Vilson Sonkar"
             echo "- **Supported Android:** Android 9.0 (API 28) – Android 16 (API 36)"
             echo "- **Connectivity:** Offline Wi-Fi Direct P2P & Bluetooth discovery (no internet required)"

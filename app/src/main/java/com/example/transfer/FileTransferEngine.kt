@@ -41,7 +41,8 @@ class FileTransferEngine(private val context: Context) {
         const val PORT = 8888
         private const val CHUNK_SIZE = 64 * 1024 // 64 KB
         private const val SOCKET_BUFFER_BYTES = 256 * 1024 // 256 KB to keep sender/receiver progress tightly synced
-        private const val MAGIC_HEADER = 0x50325046 // 'P2PF'
+        private const val MAGIC_HEADER = 0x50325046 // 'P2PF' (v1)
+        private const val MAGIC_HEADER_V2 = 0x50325047 // 'P2PG' (v2 with relativeFolder)
         private const val CODE_DATA = 1
         private const val CODE_SKIP = 2
         private const val CODE_CANCELLED_MID = -1
@@ -195,8 +196,8 @@ class FileTransferEngine(private val context: Context) {
             val outputStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
             val inputStream = DataInputStream(BufferedInputStream(socket.getInputStream()))
 
-            // Send Magic Header & file count
-            outputStream.writeInt(MAGIC_HEADER)
+            // Send Magic Header & file count (v2 includes relativeFolder)
+            outputStream.writeInt(MAGIC_HEADER_V2)
             outputStream.writeInt(files.size)
 
             // Send metadata for all files
@@ -205,6 +206,7 @@ class FileTransferEngine(private val context: Context) {
                 outputStream.writeUTF(file.name)
                 outputStream.writeLong(file.sizeBytes)
                 outputStream.writeUTF(file.mimeType)
+                outputStream.writeUTF(sanitizeRelativeFolder(file.relativeFolder))
             }
             outputStream.flush()
 
@@ -381,7 +383,7 @@ class FileTransferEngine(private val context: Context) {
             val outputStream = DataOutputStream(BufferedOutputStream(socket.getOutputStream()))
 
             val magic = inputStream.readInt()
-            if (magic != MAGIC_HEADER) {
+            if (magic != MAGIC_HEADER && magic != MAGIC_HEADER_V2) {
                 throw IllegalStateException("Invalid transfer protocol")
             }
 
@@ -392,7 +394,20 @@ class FileTransferEngine(private val context: Context) {
                 val name = inputStream.readUTF()
                 val size = inputStream.readLong()
                 val mime = inputStream.readUTF()
-                filesList.add(FileItem(id = id, name = name, sizeBytes = size, mimeType = mime))
+                val relFolder = if (magic == MAGIC_HEADER_V2) {
+                    sanitizeRelativeFolder(inputStream.readUTF())
+                } else {
+                    ""
+                }
+                filesList.add(
+                    FileItem(
+                        id = id,
+                        name = name,
+                        sizeBytes = size,
+                        mimeType = mime,
+                        relativeFolder = relFolder
+                    )
+                )
             }
 
             val mutableFiles = filesList.toMutableList()
@@ -444,7 +459,7 @@ class FileTransferEngine(private val context: Context) {
                     calculateStats(totalBytes, totalTransferred, currentSpeed, maxProgress = 0.99f)
                 )
 
-                val destination = createDestination(file.name, file.mimeType)
+                val destination = createDestination(file.name, file.mimeType, file.relativeFolder)
                 var fileTransferred = 0L
                 var isCancelled = false
 
@@ -568,16 +583,35 @@ class FileTransferEngine(private val context: Context) {
         }
     }
 
-    private fun createDestination(fileName: String, mimeType: String): ReceiveDestination {
+    internal fun sanitizeRelativeFolder(rawFolder: String): String {
+        if (rawFolder.isBlank()) return ""
+        return rawFolder.replace('\\', '/')
+            .split('/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "." && it != ".." }
+            .joinToString("/")
+    }
+
+    private fun createDestination(
+        fileName: String,
+        mimeType: String,
+        relativeFolder: String = ""
+    ): ReceiveDestination {
         val safeName = sanitizeFileName(fileName)
+        val safeFolder = sanitizeRelativeFolder(relativeFolder)
         val safeMime = resolveSafeMimeType(safeName, mimeType)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val resolver: ContentResolver = context.contentResolver
+                val targetRelativePath = if (safeFolder.isNotEmpty()) {
+                    "${Environment.DIRECTORY_DOWNLOADS}/Big Share/$safeFolder"
+                } else {
+                    "${Environment.DIRECTORY_DOWNLOADS}/Big Share"
+                }
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                     put(MediaStore.Downloads.MIME_TYPE, safeMime)
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Big Share")
+                    put(MediaStore.Downloads.RELATIVE_PATH, targetRelativePath)
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
@@ -593,7 +627,7 @@ class FileTransferEngine(private val context: Context) {
             }
         }
 
-        val fallback = getFallbackFile(safeName)
+        val fallback = getFallbackFile(safeName, safeFolder)
         return ReceiveDestination(outputStream = FileOutputStream(fallback), file = fallback)
     }
 
@@ -625,13 +659,14 @@ class FileTransferEngine(private val context: Context) {
         }
     }
 
-    internal fun getFallbackFile(fileName: String): File {
+    internal fun getFallbackFile(fileName: String, relativeFolder: String = ""): File {
         val safeName = sanitizeFileName(fileName)
+        val safeFolder = sanitizeRelativeFolder(relativeFolder)
         val publicMiniShare = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Big Share"
         )
-        val targetDir = try {
+        val baseDir = try {
             if (!publicMiniShare.exists()) {
                 publicMiniShare.mkdirs()
             }
@@ -648,6 +683,12 @@ class FileTransferEngine(private val context: Context) {
                 context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
                 "Big Share"
             ).apply { mkdirs() }
+        }
+
+        val targetDir = if (safeFolder.isNotEmpty()) {
+            File(baseDir, safeFolder).apply { mkdirs() }
+        } else {
+            baseDir
         }
 
         var target = File(targetDir, safeName)

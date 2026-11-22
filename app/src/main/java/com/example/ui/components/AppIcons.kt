@@ -15,6 +15,13 @@ object AppIcons {
         )
     }
 
+    val Share: ImageVector by lazy {
+        vectorIcon(
+            name = "Share",
+            pathData = "M18,16.08c-0.76,0 -1.44,0.3 -1.96,0.77L8.91,12.7c0.05,-0.23 0.09,-0.46 0.09,-0.7s-0.04,-0.47 -0.09,-0.7l7.05,-4.11c0.54,0.5 1.25,0.81 2.04,0.81 1.66,0 3,-1.34 3,-3s-1.34,-3 -3,-3 -3,1.34 -3,3c0,0.24 0.04,0.47 0.09,0.7L8.04,9.81C7.5,9.31 6.79,9 6,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3c0.79,0 1.5,-0.31 2.04,-0.81l7.12,4.16c-0.05,0.21 -0.08,0.43 -0.08,0.65 0,1.61 1.31,2.92 2.92,2.92 1.61,0 2.92,-1.31 2.92,-2.92s-1.31,-2.92 -2.92,-2.92z"
+        )
+    }
+
     val FileDownload: ImageVector by lazy {
         vectorIcon(
             name = "FileDownload",
@@ -118,6 +125,28 @@ object AppIcons {
         vectorIcon(
             name = "SdCard",
             pathData = "M18,2h-8L4.02,8 4,20c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM12,8h-2V4h2v4zM15,8h-2V4h2v4zM18,8h-2V4h2v4z"
+        )
+    }
+
+    val Usb: ImageVector by lazy {
+        vectorIcon(
+            name = "Usb",
+            pathData = "M15,7v4h1v2h-3V5h2l-3,-4 -3,4h2v8H8v-2.07c0.7,-0.37 1.2,-1.08 1.2,-1.93 0,-1.21 -0.99,-2.2 -2.2,-2.2 -1.21,0 -2.2,0.99 -2.2,2.2 0,0.85 0.5,1.56 1.2,1.93V13c0,1.11 0.89,2 2,2h3v3.05c-0.71,0.37 -1.2,1.1 -1.2,1.95 0,1.22 0.99,2.2 2.2,2.2 1.21,0 2.2,-0.98 2.2,-2.2 0,-0.85 -0.49,-1.58 -1.2,-1.95V15h3c1.11,0 2,-0.89 2,-2v-2h1V7h-4z"
+        )
+    }
+
+    val PhoneAndroid: ImageVector by lazy {
+        vectorIcon(
+            name = "PhoneAndroid",
+            pathData = "M16,1H8C6.34,1 5,2.34 5,4v16c0,1.66 1.34,3 3,3h8c1.66,0 3,-1.34 3,-3V4c0,-1.66 -1.34,-3 -3,-3zM14,21h-4v-1h4v1zM17.25,18H6.75V4h10.5v14z"
+        )
+    }
+
+    val ChevronRight: ImageVector by lazy {
+        vectorIcon(
+            name = "ChevronRight",
+            pathData = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z",
+            autoMirror = true
         )
     }
 

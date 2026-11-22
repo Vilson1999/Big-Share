@@ -31,7 +31,8 @@ data class FileItem(
     val uriString: String? = null,
     val mimeType: String = "*/*",
     val transferredBytes: Long = 0L,
-    val status: TransferStatus = TransferStatus.PENDING
+    val status: TransferStatus = TransferStatus.PENDING,
+    val relativeFolder: String = ""
 ) {
     val progress: Float
         get() = if (sizeBytes > 0) (transferredBytes.toFloat() / sizeBytes).coerceIn(0f, 1f) else 0f

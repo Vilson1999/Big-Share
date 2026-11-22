@@ -353,6 +353,17 @@ private fun TransferFileItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
+                if (file.relativeFolder.isNotBlank()) {
+                    Text(
+                        text = file.relativeFolder,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Row(

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,7 +54,9 @@ import com.example.ui.theme.ElectricBlue
 fun HomeScreen(
     userName: String,
     userAvatarIndex: Int,
+    isSharingApp: Boolean = false,
     onProfileClick: () -> Unit,
+    onShareAppClick: () -> Unit = {},
     onSendClick: () -> Unit,
     onReceiveClick: () -> Unit
 ) {
@@ -71,16 +75,17 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top-left user photo and name (no pencil icon)
+            // Top bar: user chip on left, Share App pill on right
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 560.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Start
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Box(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(24.dp))
                         .background(colors.surfaceVariant)
                         .border(1.dp, colors.outline, RoundedCornerShape(24.dp))
@@ -107,9 +112,46 @@ fun HomeScreen(
                             color = colors.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 200.dp)
+                            modifier = Modifier.widthIn(max = 180.dp)
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .clip(CircleShape)
+                        .background(colors.primaryContainer)
+                        .border(1.dp, colors.primary.copy(alpha = 0.5f), CircleShape)
+                        .clickable(enabled = !isSharingApp) { onShareAppClick() }
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .testTag("share_app_button"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    if (isSharingApp) {
+                        CircularProgressIndicator(
+                            color = colors.primary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = AppIcons.Share,
+                            contentDescription = "Share App APK",
+                            tint = colors.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Text(
+                        text = "Share App",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                        maxLines = 1
+                    )
                 }
             }
 

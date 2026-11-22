@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
-import com.example.ui.components.RadarAnimation
+import com.example.ui.components.PulseAnimation
 import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
 
@@ -121,7 +121,7 @@ fun ReceiveScreen(
                     }
                 }
 
-                // Radar Beacon Visual with big user photo & waves
+                // Pulse Beacon Visual with user photo & expanding waves
                 Box(
                     modifier = Modifier
                         .size(308.dp)
@@ -131,9 +131,9 @@ fun ReceiveScreen(
                         .padding(10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    RadarAnimation(
+                    PulseAnimation(
                         modifier = Modifier.fillMaxSize(),
-                        radarColor = colors.secondary,
+                        pulseColor = colors.secondary,
                         avatarDrawableRes = UserAvatarCatalog.getDrawableRes(userAvatarIndex),
                         avatarSize = 132.dp,
                         isActive = true

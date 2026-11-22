@@ -50,6 +50,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,15 +66,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.example.model.FileItem
 import com.example.model.formatBytes
 import com.example.model.formatSeconds
+import com.example.picker.BrowserEntry
+import com.example.picker.DeviceBrowser
 import com.example.picker.DeviceMediaScanner
 import com.example.picker.PickerAppItem
 import com.example.picker.PickerCategory
 import com.example.picker.PickerMediaItem
 import com.example.picker.PickerThumbnailCache
 import com.example.picker.toFileItem
+import kotlinx.coroutines.launch
 import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.atmosphericGlow
@@ -126,12 +131,15 @@ fun FilePickerScreen(
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
 
     var activeCategory by remember { mutableStateOf(PickerCategory.IMAGE) }
     var permissionPromptedOnce by remember { mutableStateOf(false) }
+    var isPreparingSend by remember { mutableStateOf(false) }
 
     val selectedMedia = remember { mutableStateMapOf<String, PickerMediaItem>() }
     val selectedApps = remember { mutableStateMapOf<String, PickerAppItem>() }
+    val selectedBrowserEntries = remember { mutableStateMapOf<String, BrowserEntry>() }
 
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -149,9 +157,11 @@ fun FilePickerScreen(
         }
     }
 
-    val totalSelectedCount = selectedMedia.size + selectedApps.size
+    val selectedFoldersCount = selectedBrowserEntries.values.count { it.isDirectory }
+    val totalSelectedCount = selectedMedia.size + selectedApps.size + selectedBrowserEntries.size
     val totalSelectedBytes = selectedMedia.values.sumOf { it.sizeBytes } +
-        selectedApps.values.sumOf { it.sizeBytes }
+        selectedApps.values.sumOf { it.sizeBytes } +
+        selectedBrowserEntries.values.filter { !it.isDirectory }.sumOf { it.sizeBytes }
 
     Box(
         modifier = Modifier
@@ -400,58 +410,17 @@ fun FilePickerScreen(
                     }
 
                     PickerCategory.FILES -> {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            when {
-                                isScanningFiles && files.isEmpty() -> {
-                                    ScanningIndicator("Scanning all folders for files...")
-                                }
-                                files.isEmpty() && !hasMediaPermission && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> {
-                                    MediaPermissionPrompt(
-                                        categoryLabel = "Files",
-                                        onGrantClick = {
-                                            onExternalPermissionLaunch()
-                                            mediaPermissionLauncher.launch(getMediaScanPermissions())
-                                        },
-                                        onBrowseClick = onSystemBrowseClick
-                                    )
-                                }
-                                files.isEmpty() -> {
-                                    EmptyPickerState(
-                                        icon = AppIcons.Description,
-                                        title = "No files found",
-                                        subtitle = "Use Browse in the top right to pick documents or archives."
-                                    )
-                                }
-                                else -> {
-                                    LazyColumn(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .testTag("picker_files_list"),
-                                        contentPadding = PaddingValues(
-                                            start = 16.dp,
-                                            end = 16.dp,
-                                            top = 4.dp,
-                                            bottom = if (totalSelectedCount > 0) 96.dp else 16.dp
-                                        ),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        items(files, key = { it.id }) { item ->
-                                            val isItemSelected = selectedMedia.containsKey(item.id)
-                                            MediaListRow(
-                                                item = item,
-                                                icon = fileIconForName(item.name),
-                                                accentColor = AmberGold,
-                                                showArtist = false,
-                                                isSelected = isItemSelected,
-                                                onClick = {
-                                                    if (isItemSelected) selectedMedia.remove(item.id) else selectedMedia[item.id] = item
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        FilesBrowserSection(
+                            hasMediaPermission = hasMediaPermission,
+                            selectedEntries = selectedBrowserEntries,
+                            bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp,
+                            onExternalPickerLaunch = onExternalPermissionLaunch,
+                            onGrantMediaPermissionClick = {
+                                onExternalPermissionLaunch()
+                                mediaPermissionLauncher.launch(getMediaScanPermissions())
+                            },
+                            onBrowseSystemFilesClick = onSystemBrowseClick
+                        )
                     }
 
                     PickerCategory.APPS -> {
@@ -583,7 +552,13 @@ fun FilePickerScreen(
                         color = colors.onSurface
                     )
                     Text(
-                        text = formatBytes(totalSelectedBytes),
+                        text = when {
+                            selectedFoldersCount > 0 && totalSelectedBytes > 0L ->
+                                "$selectedFoldersCount folder(s) + ${formatBytes(totalSelectedBytes)}"
+                            selectedFoldersCount > 0 ->
+                                "$selectedFoldersCount folder(s) selected"
+                            else -> formatBytes(totalSelectedBytes)
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.primary
                     )
@@ -593,7 +568,9 @@ fun FilePickerScreen(
                     onClick = {
                         selectedMedia.clear()
                         selectedApps.clear()
+                        selectedBrowserEntries.clear()
                     },
+                    enabled = !isPreparingSend,
                     modifier = Modifier.testTag("picker_clear_button")
                 ) {
                     Text("Clear", color = colors.onSurfaceVariant)
@@ -603,12 +580,36 @@ fun FilePickerScreen(
 
                 Button(
                     onClick = {
-                        val items = buildList {
-                            selectedMedia.values.forEach { add(it.toFileItem()) }
-                            selectedApps.values.forEach { add(it.toFileItem()) }
+                        if (!isPreparingSend) {
+                            isPreparingSend = true
+                            scope.launch {
+                                val browserFileItems = if (selectedBrowserEntries.isNotEmpty()) {
+                                    DeviceBrowser.collectFileItemsForSelection(
+                                        context,
+                                        selectedBrowserEntries.values.toList()
+                                    )
+                                } else {
+                                    emptyList()
+                                }
+                                val items = buildList {
+                                    selectedMedia.values.forEach { add(it.toFileItem()) }
+                                    selectedApps.values.forEach { add(it.toFileItem()) }
+                                    addAll(browserFileItems)
+                                }
+                                isPreparingSend = false
+                                if (items.isEmpty()) {
+                                    Toast.makeText(
+                                        context,
+                                        "Selected folder has no files to send",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    onConfirmSelection(items)
+                                }
+                            }
                         }
-                        onConfirmSelection(items)
                     },
+                    enabled = !isPreparingSend,
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.primary,
@@ -618,14 +619,22 @@ fun FilePickerScreen(
                         .height(48.dp)
                         .testTag("picker_send_button")
                 ) {
-                    Icon(
-                        imageVector = AppIcons.Send,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    if (isPreparingSend) {
+                        CircularProgressIndicator(
+                            color = colors.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = AppIcons.Send,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "SEND",
+                        text = if (isPreparingSend) "LOADING" else "SEND",
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -1179,13 +1188,5 @@ private fun MediaPermissionPrompt(
                 Text("Browse", style = MaterialTheme.typography.labelLarge)
             }
         }
-    }
-}
-
-private fun fileIconForName(fileName: String): androidx.compose.ui.graphics.vector.ImageVector {
-    return when (fileName.substringAfterLast('.', "").lowercase()) {
-        "zip", "rar", "7z", "tar", "gz", "bz2", "xz" -> AppIcons.FolderZip
-        "pdf", "doc", "docx", "txt", "md", "csv", "xls", "xlsx", "ppt", "pptx", "rtf", "epub" -> AppIcons.Description
-        else -> AppIcons.InsertDriveFile
     }
 }

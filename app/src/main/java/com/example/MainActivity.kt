@@ -64,6 +64,7 @@ import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.RadarScreen
 import com.example.ui.screens.ReceiveScreen
 import com.example.ui.screens.TransferScreen
+import com.example.transfer.AppApkSharer
 import com.example.ui.components.KeepScreenOnEffect
 import com.example.ui.theme.AppTheme
 import com.example.viewmodel.MainViewModel
@@ -297,6 +298,7 @@ fun MainAppContent(
 
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var awaitingExternalModal by remember { mutableStateOf(false) }
+    var isSharingApp by remember { mutableStateOf(false) }
     var missingSetting by remember { mutableStateOf<RequiredSetting?>(null) }
 
     val proceedWithChecks: (() -> Unit) -> Unit = remember(context) {
@@ -513,7 +515,25 @@ fun MainAppContent(
                     HomeScreen(
                         userName = userName,
                         userAvatarIndex = userAvatarIndex,
+                        isSharingApp = isSharingApp,
                         onProfileClick = { viewModel.openProfile() },
+                        onShareAppClick = {
+                            if (!isSharingApp) {
+                                isSharingApp = true
+                                awaitingExternalModal = true
+                                scope.launch {
+                                    val result = AppApkSharer.shareAppApk(context)
+                                    isSharingApp = false
+                                    if (result.isFailure) {
+                                        awaitingExternalModal = false
+                                        snackbarHostState.showSnackbar(
+                                            result.exceptionOrNull()?.localizedMessage
+                                                ?: "Unable to share app APK"
+                                        )
+                                    }
+                                }
+                            }
+                        },
                         onSendClick = {
                             requestActionWithPermissionsAndSettings {
                                 viewModel.openFilePicker()

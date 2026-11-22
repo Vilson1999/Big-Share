@@ -40,10 +40,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,7 +54,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -176,9 +173,9 @@ fun AppTopBar(
 }
 
 @Composable
-fun RadarAnimation(
+fun PulseAnimation(
     modifier: Modifier = Modifier,
-    radarColor: Color = MaterialTheme.colorScheme.primary,
+    pulseColor: Color = MaterialTheme.colorScheme.primary,
     @DrawableRes avatarDrawableRes: Int? = null,
     avatarSize: Dp = 112.dp,
     isActive: Boolean = true
@@ -186,35 +183,26 @@ fun RadarAnimation(
     val activeFactor by animateFloatAsState(
         targetValue = if (isActive) 1f else 0f,
         animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
-        label = "ActiveDiscoveryFactor"
+        label = "ActivePulseFactor"
     )
 
-    val transition = rememberInfiniteTransition(label = "RadarTransition")
-    val sweepAngle by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "SweepAngle"
-    )
+    val transition = rememberInfiniteTransition(label = "PulseTransition")
 
     val wavePhase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            animation = tween(durationMillis = 2400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "WavePhase"
+        label = "PulseWavePhase"
     )
 
     val pulseBreath by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "PulseBreath"
@@ -237,11 +225,11 @@ fun RadarAnimation(
                 0f
             }
 
-            // Soft breathing ambient glow radiating from around the user photo
-            val glowAlpha = (0.12f + 0.14f * pulseBreath * activeFactor)
+            // Soft breathing ambient glow radiating from the user photo
+            val glowAlpha = 0.10f + 0.16f * pulseBreath * activeFactor
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(radarColor.copy(alpha = glowAlpha), Color.Transparent),
+                    colors = listOf(pulseColor.copy(alpha = glowAlpha), Color.Transparent),
                     center = center,
                     radius = maxRadius
                 ),
@@ -249,14 +237,14 @@ fun RadarAnimation(
                 center = center
             )
 
-            // Subtle pulse halo hugging the user profile photo when discovery is active
+            // Soft pulse halo hugging the user profile photo when active
             if (avatarDrawableRes != null && activeFactor > 0.01f) {
-                val haloRadius = startRadius + (8.dp.toPx() + 10.dp.toPx() * pulseBreath)
-                val haloAlpha = (0.32f - 0.14f * pulseBreath) * activeFactor
+                val haloRadius = startRadius + (10.dp.toPx() + 14.dp.toPx() * pulseBreath)
+                val haloAlpha = (0.36f - 0.16f * pulseBreath) * activeFactor
                 drawCircle(
                     brush = Brush.radialGradient(
                         colorStops = arrayOf(
-                            0.65f to radarColor.copy(alpha = haloAlpha),
+                            0.60f to pulseColor.copy(alpha = haloAlpha),
                             1.0f to Color.Transparent
                         ),
                         center = center,
@@ -267,87 +255,40 @@ fun RadarAnimation(
                 )
             }
 
-            // Subtle static guide rings around the user photo
-            val ringCount = if (avatarDrawableRes != null) 2 else 4
-            for (i in 1..ringCount) {
-                val r = startRadius + (maxRadius - startRadius) * (i.toFloat() / ringCount)
-                drawCircle(
-                    color = radarColor.copy(alpha = if (i == ringCount) 0.22f else 0.11f),
-                    radius = r,
-                    center = center,
-                    style = Stroke(width = if (i == ringCount) 1.25.dp.toPx() else 1.dp.toPx())
-                )
-            }
-
+            // Concentric expanding pulse waves (no radar sweep or target reticle)
             if (activeFactor > 0.01f) {
-                // Soft sweeping sector cone behind the photo during active discovery
-                drawArc(
-                    brush = Brush.sweepGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color.Transparent,
-                            0.75f to Color.Transparent,
-                            0.95f to radarColor.copy(alpha = 0.10f * activeFactor),
-                            1.0f to radarColor.copy(alpha = 0.22f * activeFactor)
-                        ),
-                        center = center
-                    ),
-                    startAngle = sweepAngle - 75f,
-                    sweepAngle = 75f,
-                    useCenter = true,
-                    topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
-                    size = Size(maxRadius * 2f, maxRadius * 2f),
-                    alpha = 0.55f
-                )
-
-                // Three staggered subtle ripple rings starting directly around the user photo
                 val waveCount = 3
                 for (i in 0 until waveCount) {
                     val p = (wavePhase + i.toFloat() / waveCount) % 1f
                     val easedP = 1f - (1f - p) * (1f - p)
                     val waveRadius = startRadius + (maxRadius - startRadius) * easedP
                     val fade = sin(p * Math.PI).toFloat().coerceIn(0f, 1f)
-                    val waveAlpha = fade * 0.46f * activeFactor
-                    val strokeWidth = (2.2.dp - 1.1.dp * easedP).toPx().coerceAtLeast(1.dp.toPx())
+                    val fillAlpha = fade * 0.12f * activeFactor
+                    val strokeAlpha = fade * 0.52f * activeFactor
+                    val strokeWidth = (2.5.dp - 1.2.dp * easedP).toPx().coerceAtLeast(1.dp.toPx())
 
                     drawCircle(
-                        color = radarColor.copy(alpha = waveAlpha),
+                        color = pulseColor.copy(alpha = fillAlpha),
+                        radius = waveRadius,
+                        center = center
+                    )
+                    drawCircle(
+                        color = pulseColor.copy(alpha = strokeAlpha),
                         radius = waveRadius,
                         center = center,
                         style = Stroke(width = strokeWidth)
                     )
                 }
-
-                // Subtle sweep beam starting from photo edge
-                val rad = Math.toRadians(sweepAngle.toDouble())
-                val startX = center.x + startRadius * cos(rad).toFloat()
-                val startY = center.y + startRadius * sin(rad).toFloat()
-                val endX = center.x + maxRadius * cos(rad).toFloat()
-                val endY = center.y + maxRadius * sin(rad).toFloat()
-
-                drawLine(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            radarColor.copy(alpha = 0.55f * activeFactor),
-                            radarColor.copy(alpha = 0.03f)
-                        ),
-                        start = Offset(startX, startY),
-                        end = Offset(endX, endY)
-                    ),
-                    start = Offset(startX, startY),
-                    end = Offset(endX, endY),
-                    strokeWidth = 1.75.dp.toPx(),
-                    cap = StrokeCap.Round
-                )
             }
 
             if (avatarDrawableRes == null) {
                 drawCircle(
-                    color = radarColor.copy(alpha = 0.25f),
+                    color = pulseColor.copy(alpha = 0.25f),
                     radius = 12.dp.toPx(),
                     center = center
                 )
                 drawCircle(
-                    color = radarColor,
+                    color = pulseColor,
                     radius = 5.5.dp.toPx(),
                     center = center
                 )
@@ -355,7 +296,7 @@ fun RadarAnimation(
         }
 
         if (avatarDrawableRes != null) {
-            val avatarScale = 1f + 0.03f * pulseBreath * activeFactor
+            val avatarScale = 1f + 0.035f * pulseBreath * activeFactor
             Box(
                 modifier = Modifier
                     .size(avatarSize)
@@ -366,8 +307,8 @@ fun RadarAnimation(
                     .shadow(
                         elevation = (12f + 8f * pulseBreath * activeFactor).dp,
                         shape = CircleShape,
-                        ambientColor = radarColor.copy(alpha = 0.45f),
-                        spotColor = radarColor.copy(alpha = 0.55f)
+                        ambientColor = pulseColor.copy(alpha = 0.45f),
+                        spotColor = pulseColor.copy(alpha = 0.55f)
                     )
                     .clip(CircleShape)
                     .background(colors.surface)
@@ -375,8 +316,8 @@ fun RadarAnimation(
                         width = 3.dp,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                radarColor,
-                                radarColor.copy(alpha = 0.50f + 0.35f * pulseBreath * activeFactor)
+                                pulseColor,
+                                pulseColor.copy(alpha = 0.50f + 0.35f * pulseBreath * activeFactor)
                             )
                         ),
                         shape = CircleShape

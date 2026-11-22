@@ -239,4 +239,82 @@ class ExampleRobolectricTest {
     assertTrue(kotlin.math.abs(senderStartedAt.get() - receiverStartedAt.get()) < 1000L)
     assertTrue(kotlin.math.abs(senderDoneAt.get() - receiverDoneAt.get()) < 1000L)
   }
+
+  @Test
+  @Config(sdk = [28])
+  fun testFolderTransferCreatesSameFolderAndMovesFilesInside() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val engine = com.example.transfer.FileTransferEngine(context)
+
+    assertEquals("Vacation/Day2", engine.sanitizeRelativeFolder("../Vacation\\Day2/./"))
+    assertEquals("", engine.sanitizeRelativeFolder("../../.."))
+
+    val nestedDest = engine.getFallbackFile("photo.jpg", "Vacation/Day2")
+    assertEquals("Day2", nestedDest.parentFile?.name)
+    assertEquals("Vacation", nestedDest.parentFile?.parentFile?.name)
+    assertEquals("Big Share", nestedDest.parentFile?.parentFile?.parentFile?.name)
+
+    val tempFolder = File(context.cacheDir, "TestShareFolder").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val subFolder = File(tempFolder, "SubDocs").apply { mkdirs() }
+    val rootFile = File(tempFolder, "note.txt").apply { writeText("hello folder") }
+    val subFile = File(subFolder, "doc.txt").apply { writeText("nested doc") }
+
+    val folderEntry = com.example.picker.BrowserEntry(
+      id = "dir:${tempFolder.absolutePath}",
+      name = tempFolder.name,
+      isDirectory = true,
+      sizeBytes = 0L,
+      mimeType = "vnd.android.document/directory",
+      lastModifiedMs = tempFolder.lastModified(),
+      file = tempFolder
+    )
+
+    val collected = com.example.picker.DeviceBrowser.collectFileItemsForSelection(
+      context,
+      listOf(folderEntry)
+    )
+    assertEquals(2, collected.size)
+    assertTrue(collected.any { it.name == "note.txt" && it.relativeFolder == "TestShareFolder" })
+    assertTrue(collected.any { it.name == "doc.txt" && it.relativeFolder == "TestShareFolder/SubDocs" })
+
+    val receiver = com.example.transfer.FileTransferEngine(context)
+    val sender = com.example.transfer.FileTransferEngine(context)
+    var receivedMeta: List<FileItem> = emptyList()
+    var senderOk = false
+    var receiverOk = false
+
+    val rxJob = async {
+      receiver.receiveFiles(
+        isGroupOwner = true,
+        hostAddress = "127.0.0.1",
+        onTransferStarted = { items, _ -> receivedMeta = items },
+        onProgress = { _, _ -> },
+        onComplete = { ok, _ -> receiverOk = ok }
+      )
+    }
+    val txJob = async {
+      sender.sendFiles(
+        isGroupOwner = false,
+        hostAddress = "127.0.0.1",
+        files = collected,
+        onTransferStarted = { _, _ -> },
+        onProgress = { _, _ -> },
+        onComplete = { ok, _ -> senderOk = ok }
+      )
+    }
+    rxJob.await()
+    txJob.await()
+    rootFile.delete()
+    subFile.delete()
+    tempFolder.deleteRecursively()
+
+    assertTrue(senderOk)
+    assertTrue(receiverOk)
+    assertEquals(2, receivedMeta.size)
+    assertTrue(receivedMeta.any { it.name == "note.txt" && it.relativeFolder == "TestShareFolder" })
+    assertTrue(receivedMeta.any { it.name == "doc.txt" && it.relativeFolder == "TestShareFolder/SubDocs" })
+  }
 }

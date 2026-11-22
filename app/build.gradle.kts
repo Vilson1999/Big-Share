@@ -4,6 +4,8 @@ plugins {
 }
 
 val isSplitApk = project.hasProperty("splitApk")
+val appVersionCodeProp = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
+val appVersionNameProp = (project.findProperty("appVersionName") as? String)?.takeIf { it.isNotBlank() }
 
 android {
   namespace = "com.example"
@@ -13,8 +15,8 @@ android {
     applicationId = "com.big.share"
     minSdk = 28
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = appVersionCodeProp ?: 10
+    versionName = appVersionNameProp ?: "1.0.10"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     resourceConfigurations += listOf("en")
