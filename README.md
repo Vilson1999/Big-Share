@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Developer:</strong> Vilson Sonkar<br />
-  <strong>Version:</strong> 1.0<br />
+  <strong>Latest release:</strong> <a href="https://github.com/Vilson1999/Big-Share/releases/latest">v1.0.7</a><br />
   <strong>Package:</strong> com.big.share<br />
   <strong>Language:</strong> Kotlin
 </p>
@@ -17,7 +17,7 @@
 
 ### Send
 
-Choose files on your device, discover nearby peers, and send selected files directly to another connected device.
+Choose files on your device, discover nearby peers, and send selected files directly to another connected device. The picker supports images, videos, music, installed apps, APK files, and browsing files from Android's system picker.
 
 ### Receive
 
@@ -34,6 +34,19 @@ Discover nearby devices and establish a local peer-to-peer connection without a 
 ### Bluetooth Discovery
 
 Bluetooth discovery helpers assist nearby-device discovery alongside Android Wi-Fi Direct APIs.
+
+### Profiles and sharing
+
+Set a display name and avatar for nearby-device identification. Files can also be shared to Big Share from Android's system share menu.
+
+## Releases and Updates
+
+The latest published release is **v1.0.7**. The project publishes separate APK downloads for ARMv7 and ARMv8 devices. Open the [latest release](https://github.com/Vilson1999/Big-Share/releases/latest) for release notes and download links, or use these always-latest downloads:
+
+- [ARMv7 (`armeabi-v7a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MiniShare-armv7-armeabi-v7a.apk)
+- [ARMv8 (`arm64-v8a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MiniShare-armv8-arm64-v8a.apk)
+
+GitHub Actions builds and publishes APKs when code is pushed to the configured branches or a version tag is pushed. For builds without a version tag, the release tag is generated automatically from the workflow run number (`v1.0.<run number>`). Check the Releases page for the current version and its release details.
 
 ## Technology
 
@@ -67,7 +80,7 @@ app/src/main/java/com/example/
 
 ## Build Configuration
 
-The Android app is configured with:
+The Android app's Gradle configuration currently specifies:
 
 - Application ID: `com.big.share`
 - Version name: `1.0`
@@ -76,7 +89,7 @@ The Android app is configured with:
 - Target SDK: `36`
 - Compile SDK: `36`
 
-See `app/build.gradle.kts` for the complete build and dependency configuration.
+The published GitHub release version is tracked separately from these Gradle values. See `app/build.gradle.kts` for the complete build and dependency configuration.
 
 ## License
 
