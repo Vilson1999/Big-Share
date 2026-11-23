@@ -15,8 +15,8 @@ android {
     applicationId = "com.big.share"
     minSdk = 28
     targetSdk = 36
-    versionCode = appVersionCodeProp ?: 10
-    versionName = appVersionNameProp ?: "1.0.10"
+    versionCode = appVersionCodeProp ?: 11
+    versionName = appVersionNameProp ?: "1.0.11"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     resourceConfigurations += listOf("en")
@@ -107,7 +107,11 @@ android {
         "kotlin-tooling-metadata.json",
         "DebugProbesKt.bin",
         "META-INF/README*",
-        "META-INF/CHANGES*"
+        "META-INF/CHANGES*",
+        "META-INF/DEPENDENCIES",
+        "META-INF/INDEX.LIST",
+        "META-INF/*.txt",
+        "kotlin/**"
       )
     }
   }

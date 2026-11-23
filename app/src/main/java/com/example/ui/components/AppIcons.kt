@@ -128,20 +128,6 @@ object AppIcons {
         )
     }
 
-    val Usb: ImageVector by lazy {
-        vectorIcon(
-            name = "Usb",
-            pathData = "M15,7v4h1v2h-3V5h2l-3,-4 -3,4h2v8H8v-2.07c0.7,-0.37 1.2,-1.08 1.2,-1.93 0,-1.21 -0.99,-2.2 -2.2,-2.2 -1.21,0 -2.2,0.99 -2.2,2.2 0,0.85 0.5,1.56 1.2,1.93V13c0,1.11 0.89,2 2,2h3v3.05c-0.71,0.37 -1.2,1.1 -1.2,1.95 0,1.22 0.99,2.2 2.2,2.2 1.21,0 2.2,-0.98 2.2,-2.2 0,-0.85 -0.49,-1.58 -1.2,-1.95V15h3c1.11,0 2,-0.89 2,-2v-2h1V7h-4z"
-        )
-    }
-
-    val PhoneAndroid: ImageVector by lazy {
-        vectorIcon(
-            name = "PhoneAndroid",
-            pathData = "M16,1H8C6.34,1 5,2.34 5,4v16c0,1.66 1.34,3 3,3h8c1.66,0 3,-1.34 3,-3V4c0,-1.66 -1.34,-3 -3,-3zM14,21h-4v-1h4v1zM17.25,18H6.75V4h10.5v14z"
-        )
-    }
-
     val ChevronRight: ImageVector by lazy {
         vectorIcon(
             name = "ChevronRight",

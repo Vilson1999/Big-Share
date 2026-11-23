@@ -309,7 +309,6 @@ fun MainAppContent(
     val pickerInstalledApps by viewModel.pickerInstalledApps.collectAsStateWithLifecycle()
     val pickerApkFiles by viewModel.pickerApkFiles.collectAsStateWithLifecycle()
     val isScanningMedia by viewModel.isScanningMedia.collectAsStateWithLifecycle()
-    val isScanningFiles by viewModel.isScanningFiles.collectAsStateWithLifecycle()
     val isScanningApps by viewModel.isScanningApps.collectAsStateWithLifecycle()
     val hasMediaPermission by viewModel.hasMediaPermission.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -587,7 +586,6 @@ fun MainAppContent(
                         installedApps = pickerInstalledApps,
                         apkFiles = pickerApkFiles,
                         isScanningMedia = isScanningMedia,
-                        isScanningFiles = isScanningFiles,
                         isScanningApps = isScanningApps,
                         hasMediaPermission = hasMediaPermission,
                         onEnsureLoaded = { viewModel.ensurePickerFilesLoaded() },
@@ -600,7 +598,6 @@ fun MainAppContent(
                         onExternalPermissionLaunch = {
                             awaitingExternalModal = true
                         },
-                        onRescanApps = { viewModel.rescanAppsAndApks() },
                         onConfirmSelection = { items ->
                             viewModel.onFileItemsPicked(items)
                         }

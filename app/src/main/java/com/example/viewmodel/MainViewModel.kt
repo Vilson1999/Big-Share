@@ -111,9 +111,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isScanningMedia = MutableStateFlow(false)
     val isScanningMedia: StateFlow<Boolean> = _isScanningMedia.asStateFlow()
 
-    private val _isScanningFiles = MutableStateFlow(false)
-    val isScanningFiles: StateFlow<Boolean> = _isScanningFiles.asStateFlow()
-
     private val _isScanningApps = MutableStateFlow(false)
     val isScanningApps: StateFlow<Boolean> = _isScanningApps.asStateFlow()
 
@@ -295,10 +292,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshMediaPermissionAndLoad(forceRefresh = false)
     }
 
-    fun rescanAppsAndApks() {
-        ensureAppsAndApksLoaded(forceRefresh = true)
-    }
-
     fun refreshMediaPermissionAndLoad(forceRefresh: Boolean = false) {
         val wasGranted = _hasMediaPermission.value
         val granted = DeviceMediaScanner.hasAnyMediaReadPermission(getApplication())
@@ -332,7 +325,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         filesPreloadJob?.cancel()
         filesPreloadJob = viewModelScope.launch {
-            _isScanningFiles.value = true
             try {
                 DeviceMediaScanner.scanFilesProgressively(getApplication()) { scannedFiles ->
                     if (!forceRefresh || scannedFiles.isNotEmpty() || !hasCompletedFilesScan) {
@@ -341,8 +333,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 hasCompletedFilesScan = true
                 persistTempCache(includeFiles = true)
-            } finally {
-                _isScanningFiles.value = false
+            } catch (_: Exception) {
             }
         }
     }

@@ -1,9 +1,6 @@
 package com.example.ui.screens
 
 import android.Manifest
-import android.app.Activity
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,7 +39,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,14 +70,11 @@ import com.example.model.FileItem
 import com.example.model.formatBytes
 import com.example.model.formatSeconds
 import com.example.picker.BrowserEntry
-import com.example.picker.BrowserStorageRoot
 import com.example.picker.DeviceBrowser
-import com.example.picker.DeviceMediaScanner
 import com.example.picker.PickerAppItem
 import com.example.picker.PickerCategory
 import com.example.picker.PickerMediaItem
 import com.example.picker.PickerThumbnailCache
-import com.example.picker.StorageKind
 import com.example.picker.toFileItem
 import kotlinx.coroutines.launch
 import com.example.ui.components.AppIcons
@@ -124,7 +117,6 @@ fun FilePickerScreen(
     installedApps: List<PickerAppItem>,
     apkFiles: List<PickerAppItem>,
     isScanningMedia: Boolean,
-    isScanningFiles: Boolean = false,
     isScanningApps: Boolean,
     hasMediaPermission: Boolean,
     onEnsureLoaded: () -> Unit,
@@ -132,7 +124,6 @@ fun FilePickerScreen(
     onBackClick: () -> Unit,
     onSystemBrowseClick: () -> Unit,
     onExternalPermissionLaunch: () -> Unit,
-    onRescanApps: () -> Unit = {},
     onConfirmSelection: (List<FileItem>) -> Unit
 ) {
     val context = LocalContext.current
@@ -142,64 +133,15 @@ fun FilePickerScreen(
     var activeCategory by remember { mutableStateOf(PickerCategory.IMAGE) }
     var permissionPromptedOnce by remember { mutableStateOf(false) }
     var isPreparingSend by remember { mutableStateOf(false) }
-    var appStorageRoots by remember { mutableStateOf<List<BrowserStorageRoot>>(emptyList()) }
 
     val selectedMedia = remember { mutableStateMapOf<String, PickerMediaItem>() }
     val selectedApps = remember { mutableStateMapOf<String, PickerAppItem>() }
     val selectedBrowserEntries = remember { mutableStateMapOf<String, BrowserEntry>() }
 
-    fun handleAppTreeUriPicked(uri: Uri?) {
-        if (uri == null) return
-        try {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-        } catch (_: Exception) {}
-        onRescanApps()
-        scope.launch {
-            appStorageRoots = DeviceBrowser.discoverStorageRoots(context)
-        }
-    }
-
-    val appTreeLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        handleAppTreeUriPicked(uri)
-    }
-
-    val appVolumeAccessLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            handleAppTreeUriPicked(result.data?.data)
-        }
-    }
-
-    fun launchApkStoragePicker(root: BrowserStorageRoot? = null) {
-        onExternalPermissionLaunch()
-        val vol = root?.storageVolume
-        if (vol != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                @Suppress("DEPRECATION")
-                val intent = vol.createOpenDocumentTreeIntent()
-                appVolumeAccessLauncher.launch(intent)
-                return
-            } catch (_: Exception) {}
-        }
-        appTreeLauncher.launch(null)
-    }
-
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
         onMediaPermissionResult()
-    }
-
-    LaunchedEffect(activeCategory) {
-        if (activeCategory == PickerCategory.APPS) {
-            appStorageRoots = DeviceBrowser.discoverStorageRoots(context)
-        }
     }
 
     // Ensure preload is active and request storage permissions once if not already granted
@@ -304,24 +246,7 @@ fun FilePickerScreen(
                 }
             }
 
-            val showStreamingBar = when (activeCategory) {
-                PickerCategory.IMAGE -> isScanningMedia && images.isNotEmpty()
-                PickerCategory.VIDEO -> isScanningMedia && videos.isNotEmpty()
-                PickerCategory.MUSIC -> isScanningMedia && music.isNotEmpty()
-                PickerCategory.FILES -> isScanningFiles && files.isNotEmpty()
-                PickerCategory.APPS -> isScanningApps && (installedApps.isNotEmpty() || apkFiles.isNotEmpty())
-            }
-            if (showStreamingBar) {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp),
-                    color = colors.primary,
-                    trackColor = colors.surfaceVariant
-                )
-            } else {
-                Spacer(modifier = Modifier.height(6.dp))
-            }
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Main content area
             Box(
@@ -336,7 +261,6 @@ fun FilePickerScreen(
                             items = images,
                             hasMediaPermission = hasMediaPermission,
                             isScanningMedia = isScanningMedia,
-                            scanningText = "Scanning images...",
                             emptyIcon = AppIcons.Image,
                             emptyTitle = "No images found",
                             emptySubtitle = "Use Browse in the top right to pick files manually.",
@@ -380,7 +304,6 @@ fun FilePickerScreen(
                             items = videos,
                             hasMediaPermission = hasMediaPermission,
                             isScanningMedia = isScanningMedia,
-                            scanningText = "Scanning videos...",
                             emptyIcon = AppIcons.Movie,
                             emptyTitle = "No videos found",
                             emptySubtitle = "Use Browse in the top right to pick videos manually.",
@@ -425,7 +348,6 @@ fun FilePickerScreen(
                             items = music,
                             hasMediaPermission = hasMediaPermission,
                             isScanningMedia = isScanningMedia,
-                            scanningText = "Scanning audio...",
                             emptyIcon = AppIcons.MusicNote,
                             emptyTitle = "No audio tracks found",
                             emptySubtitle = "Use Browse in the top right to pick audio files manually.",
@@ -468,21 +390,14 @@ fun FilePickerScreen(
                         FilesBrowserSection(
                             hasMediaPermission = hasMediaPermission,
                             selectedEntries = selectedBrowserEntries,
-                            bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp,
-                            onExternalPickerLaunch = onExternalPermissionLaunch,
-                            onGrantMediaPermissionClick = {
-                                onExternalPermissionLaunch()
-                                mediaPermissionLauncher.launch(getMediaScanPermissions())
-                            },
-                            onBrowseSystemFilesClick = onSystemBrowseClick,
-                            onStorageAccessGranted = onRescanApps
+                            bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp
                         )
                     }
 
                     PickerCategory.APPS -> {
                         Box(modifier = Modifier.fillMaxSize()) {
                             if (isScanningApps && installedApps.isEmpty() && apkFiles.isEmpty()) {
-                                ScanningIndicator("Loading apps & APKs...")
+                                ScanningIndicator()
                             } else {
                                 // Apps Grid View (5 columns): Installed apps first, then APK FILES section below
                                 LazyVerticalGrid(
@@ -514,168 +429,41 @@ fun FilePickerScreen(
                                         )
                                     }
 
-                                    item(
-                                        key = "apk_section_header",
-                                        span = { GridItemSpan(maxLineSpan) }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 6.dp, bottom = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(EmeraldLight.copy(alpha = 0.25f))
-                                                    .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), CircleShape)
-                                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                                            ) {
-                                                Text(
-                                                    text = "APK FILES (${apkFiles.size})",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = colors.onSurface
-                                                )
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .height(1.dp)
-                                                    .background(colors.outline.copy(alpha = 0.5f))
-                                            )
-                                            Row(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(colors.surfaceVariant)
-                                                    .border(1.dp, colors.outline, CircleShape)
-                                                    .clickable(enabled = !isScanningApps) { onRescanApps() }
-                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                                                    .testTag("rescan_apks_button"),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Text(
-                                                    text = if (isScanningApps) "Scanning..." else "Rescan",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = colors.primary
-                                                )
-                                            }
-                                            Row(
-                                                modifier = Modifier
-                                                    .clip(CircleShape)
-                                                    .background(colors.primaryContainer)
-                                                    .border(1.dp, colors.primary.copy(alpha = 0.5f), CircleShape)
-                                                    .clickable { launchApkStoragePicker(null) }
-                                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                                                    .testTag("scan_apk_folder_button"),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = AppIcons.FolderOpen,
-                                                    contentDescription = "Scan folder for APKs",
-                                                    tint = colors.primary,
-                                                    modifier = Modifier.size(13.dp)
-                                                )
-                                                Text(
-                                                    text = "+ Folder",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = colors.primary
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    if (apkFiles.isEmpty()) {
+                                    if (apkFiles.isNotEmpty()) {
                                         item(
-                                            key = "apk_empty_scan_card",
+                                            key = "apk_section_header",
                                             span = { GridItemSpan(maxLineSpan) }
                                         ) {
-                                            Column(
+                                            Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(colors.surfaceVariant)
-                                                    .border(1.dp, colors.outline, RoundedCornerShape(16.dp))
-                                                    .padding(14.dp),
-                                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                                    .padding(top = 6.dp, bottom = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
-                                                Text(
-                                                    text = if (isScanningApps) {
-                                                        "Scanning internal & external storage for .apk files..."
-                                                    } else {
-                                                        "No .apk files found yet. On Android 11+, grant access to your Internal Storage, SD Card, or USB folder to scan all .apk files inside."
-                                                    },
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = colors.onSurfaceVariant
-                                                )
-                                                val volumeRoots = appStorageRoots.filter { it.storageVolume != null }
-                                                Row(
+                                                Box(
                                                     modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .horizontalScroll(rememberScrollState()),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                        .clip(CircleShape)
+                                                        .background(EmeraldLight.copy(alpha = 0.25f))
+                                                        .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), CircleShape)
+                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
                                                 ) {
-                                                    volumeRoots.forEach { root ->
-                                                        val chipIcon = when (root.kind) {
-                                                            StorageKind.INTERNAL -> AppIcons.PhoneAndroid
-                                                            StorageKind.SD_CARD -> AppIcons.SdCard
-                                                            StorageKind.USB_DRIVE -> AppIcons.Usb
-                                                            StorageKind.FOLDER -> AppIcons.FolderOpen
-                                                        }
-                                                        Row(
-                                                            modifier = Modifier
-                                                                .clip(RoundedCornerShape(12.dp))
-                                                                .background(colors.primaryContainer)
-                                                                .border(1.dp, colors.primary.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                                                                .clickable { launchApkStoragePicker(root) }
-                                                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                        ) {
-                                                            Icon(
-                                                                imageVector = chipIcon,
-                                                                contentDescription = root.label,
-                                                                tint = colors.primary,
-                                                                modifier = Modifier.size(15.dp)
-                                                            )
-                                                            Text(
-                                                                text = "Scan ${root.label}",
-                                                                style = MaterialTheme.typography.labelMedium,
-                                                                color = colors.primary
-                                                            )
-                                                        }
-                                                    }
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(12.dp))
-                                                            .background(colors.surface)
-                                                            .border(1.dp, colors.outline, RoundedCornerShape(12.dp))
-                                                            .clickable { launchApkStoragePicker(null) }
-                                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = AppIcons.FolderOpen,
-                                                            contentDescription = "Pick Folder or Drive",
-                                                            tint = colors.onSurface,
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                        Text(
-                                                            text = "Pick Folder / Drive",
-                                                            style = MaterialTheme.typography.labelMedium,
-                                                            color = colors.onSurface
-                                                        )
-                                                    }
+                                                    Text(
+                                                        text = "APK FILES (${apkFiles.size})",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = colors.onSurface
+                                                    )
                                                 }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(1.dp)
+                                                        .background(colors.outline.copy(alpha = 0.5f))
+                                                )
                                             }
                                         }
-                                    } else {
+
                                         items(apkFiles, key = { it.id }) { apk ->
                                             val isApkSelected = selectedApps.containsKey(apk.id)
                                             AppGridCell(
@@ -966,7 +754,6 @@ private fun MediaCategoryBody(
     items: List<PickerMediaItem>,
     hasMediaPermission: Boolean,
     isScanningMedia: Boolean,
-    scanningText: String,
     emptyIcon: androidx.compose.ui.graphics.vector.ImageVector,
     emptyTitle: String,
     emptySubtitle: String,
@@ -980,7 +767,7 @@ private fun MediaCategoryBody(
             onGrantClick = onGrantClick,
             onBrowseClick = onBrowseClick
         )
-        isScanningMedia && items.isEmpty() -> ScanningIndicator(scanningText)
+        isScanningMedia && items.isEmpty() -> ScanningIndicator()
         items.isEmpty() -> EmptyPickerState(
             icon = emptyIcon,
             title = emptyTitle,
@@ -1232,26 +1019,18 @@ private fun SelectionDot(
 }
 
 @Composable
-private fun ScanningIndicator(message: String) {
+private fun ScanningIndicator() {
     val colors = MaterialTheme.colorScheme
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        contentAlignment = Alignment.Center
     ) {
         CircularProgressIndicator(
             color = colors.primary,
             modifier = Modifier.size(36.dp),
             strokeWidth = 3.dp
-        )
-        Spacer(modifier = Modifier.height(14.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center
         )
     }
 }
