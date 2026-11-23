@@ -297,7 +297,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val granted = DeviceMediaScanner.hasAnyMediaReadPermission(getApplication())
         _hasMediaPermission.value = granted
         if (!granted) return
-        if (!wasGranted) {
+        if (!wasGranted || forceRefresh) {
             ensureAppsAndApksLoaded(forceRefresh = true)
             ensureFilesLoaded(forceRefresh = true)
         }

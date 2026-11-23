@@ -390,7 +390,9 @@ fun FilePickerScreen(
                         FilesBrowserSection(
                             hasMediaPermission = hasMediaPermission,
                             selectedEntries = selectedBrowserEntries,
-                            bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp
+                            bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp,
+                            onExternalPermissionLaunch = onExternalPermissionLaunch,
+                            onAllFilesPermissionChanged = onMediaPermissionResult
                         )
                     }
 

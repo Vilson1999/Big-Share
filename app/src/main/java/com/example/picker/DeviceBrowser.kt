@@ -1,7 +1,9 @@
 package com.example.picker
 
+import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -10,6 +12,7 @@ import android.os.storage.StorageVolume
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
+import androidx.core.content.ContextCompat
 import com.example.model.FileItem
 import com.example.model.TransferStatus
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +61,17 @@ data class BrowserPathCrumb(
 object DeviceBrowser {
 
     private const val MAX_FOLDER_DEPTH = 16
+
+    fun hasAllFilesAccess(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
 
     suspend fun discoverStorageRoots(
         context: Context,
@@ -369,63 +383,58 @@ object DeviceBrowser {
         }
 
         // Supplement with standard folders and MediaStore-indexed files on Android 11+ Scoped Storage
-        val primaryRoot = try {
-            Environment.getExternalStorageDirectory()
-        } catch (_: Exception) {
-            null
-        }
-        if (primaryRoot != null) {
-            val primaryPath = canonicalPathSafe(primaryRoot).trimEnd('/')
+        val matchedRoot = resolveStorageVolumeMatch(context, dir)
+        if (matchedRoot != null) {
+            val (rootPath, volumeName, isPrimary) = matchedRoot
             val dirPath = canonicalPathSafe(dir).trimEnd('/')
-            if (dirPath == primaryPath || dirPath.startsWith("$primaryPath/")) {
-                val relDir = if (dirPath == primaryPath) {
-                    ""
-                } else {
-                    dirPath.removePrefix("$primaryPath/").trim('/')
-                }
+            val relDir = if (dirPath == rootPath) {
+                ""
+            } else {
+                dirPath.removePrefix("$rootPath/").trim('/')
+            }
 
-                if (relDir.isEmpty()) {
-                    val standardDirs = listOf(
-                        "Download", "Documents", "Pictures", "DCIM",
-                        "Music", "Movies", "Alarms", "Podcasts",
-                        "Ringtones", "Audiobooks", "Recordings"
-                    )
-                    for (stdName in standardDirs) {
-                        if (seenFolderNames.contains(stdName.lowercase())) continue
-                        val sub = File(dir, stdName)
-                        if (sub.exists() && sub.isDirectory && seenFolderNames.add(stdName.lowercase())) {
-                            val count = try {
-                                sub.listFiles()?.count { it.name != "." && it.name != ".." }
-                            } catch (_: Exception) {
-                                null
-                            }
-                            folders.add(
-                                BrowserEntry(
-                                    id = "dir:${sub.absolutePath}",
-                                    name = sub.name,
-                                    isDirectory = true,
-                                    sizeBytes = 0L,
-                                    mimeType = DocumentsContract.Document.MIME_TYPE_DIR,
-                                    lastModifiedMs = sub.lastModified(),
-                                    childCount = count,
-                                    file = sub
-                                )
-                            )
+            if (isPrimary && relDir.isEmpty()) {
+                val standardDirs = listOf(
+                    "Download", "Documents", "Pictures", "DCIM",
+                    "Music", "Movies", "Alarms", "Podcasts",
+                    "Ringtones", "Audiobooks", "Recordings"
+                )
+                for (stdName in standardDirs) {
+                    if (seenFolderNames.contains(stdName.lowercase())) continue
+                    val sub = File(dir, stdName)
+                    if (sub.exists() && sub.isDirectory && seenFolderNames.add(stdName.lowercase())) {
+                        val count = try {
+                            sub.listFiles()?.count { it.name != "." && it.name != ".." }
+                        } catch (_: Exception) {
+                            null
                         }
+                        folders.add(
+                            BrowserEntry(
+                                id = "dir:${sub.absolutePath}",
+                                name = sub.name,
+                                isDirectory = true,
+                                sizeBytes = 0L,
+                                mimeType = DocumentsContract.Document.MIME_TYPE_DIR,
+                                lastModifiedMs = sub.lastModified(),
+                                childCount = count,
+                                file = sub
+                            )
+                        )
                     }
                 }
-
-                mergeMediaStoreDirectoryEntries(
-                    context = context,
-                    dir = dir,
-                    primaryPath = primaryPath,
-                    relDir = relDir,
-                    folders = folders,
-                    files = files,
-                    seenFolderNames = seenFolderNames,
-                    seenFileNames = seenFileNames
-                )
             }
+
+            mergeMediaStoreDirectoryEntries(
+                context = context,
+                dir = dir,
+                rootPath = rootPath,
+                volumeName = volumeName,
+                relDir = relDir,
+                folders = folders,
+                files = files,
+                seenFolderNames = seenFolderNames,
+                seenFileNames = seenFileNames
+            )
         }
 
         folders.sortBy { it.name.lowercase() }
@@ -433,10 +442,57 @@ object DeviceBrowser {
         return folders + files
     }
 
+    private data class VolumePathMatch(
+        val rootPath: String,
+        val volumeName: String,
+        val isPrimary: Boolean
+    )
+
+    private fun resolveStorageVolumeMatch(context: Context, dir: File): VolumePathMatch? {
+        val dirPath = canonicalPathSafe(dir).trimEnd('/')
+        val candidates = mutableListOf<VolumePathMatch>()
+
+        try {
+            Environment.getExternalStorageDirectory()?.let { primary ->
+                candidates.add(
+                    VolumePathMatch(
+                        rootPath = canonicalPathSafe(primary).trimEnd('/'),
+                        volumeName = "external",
+                        isPrimary = true
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val sm = context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
+            sm?.storageVolumes?.forEach { vol ->
+                val volDir = when {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> vol.directory
+                    vol.isPrimary -> Environment.getExternalStorageDirectory()
+                    !vol.uuid.isNullOrBlank() -> File("/storage/${vol.uuid}").takeIf { it.exists() }
+                    else -> null
+                } ?: return@forEach
+                val volPath = canonicalPathSafe(volDir).trimEnd('/')
+                val volName = when {
+                    vol.isPrimary -> "external"
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !vol.uuid.isNullOrBlank() -> vol.uuid!!.lowercase()
+                    else -> "external"
+                }
+                candidates.add(VolumePathMatch(volPath, volName, vol.isPrimary))
+            }
+        } catch (_: Exception) {}
+
+        return candidates.firstOrNull { match ->
+            dirPath == match.rootPath || dirPath.startsWith("${match.rootPath}/", ignoreCase = true)
+        }
+    }
+
     private fun mergeMediaStoreDirectoryEntries(
         context: Context,
         dir: File,
-        primaryPath: String,
+        rootPath: String,
+        volumeName: String,
         relDir: String,
         folders: MutableList<BrowserEntry>,
         files: MutableList<BrowserEntry>,
@@ -444,10 +500,13 @@ object DeviceBrowser {
         seenFileNames: MutableSet<String>
     ) {
         val collections = buildList {
+            add(MediaStore.Images.Media.getContentUri(volumeName))
+            add(MediaStore.Video.Media.getContentUri(volumeName))
+            add(MediaStore.Audio.Media.getContentUri(volumeName))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(MediaStore.Downloads.getContentUri("external"))
+                add(MediaStore.Downloads.getContentUri(volumeName))
             }
-            add(MediaStore.Files.getContentUri("external"))
+            add(MediaStore.Files.getContentUri(volumeName))
         }
         val projection = buildList {
             add(MediaStore.MediaColumns._ID)
@@ -497,8 +556,8 @@ object DeviceBrowser {
                         val rawRelPath = if (relCol != -1) c.getString(relCol) else null
                         val itemRelDir = when {
                             rawRelPath != null -> rawRelPath.trim('/')
-                            dataPath != null && dataPath.startsWith("$primaryPath/") -> {
-                                dataPath.removePrefix("$primaryPath/")
+                            dataPath != null && dataPath.startsWith("$rootPath/", ignoreCase = true) -> {
+                                dataPath.substring(rootPath.length + 1)
                                     .substringBeforeLast('/', "")
                                     .trim('/')
                             }
@@ -713,24 +772,21 @@ object DeviceBrowser {
         rootFolderName: String,
         onFile: (FileItem) -> Unit
     ) {
-        val primaryRoot = try {
-            Environment.getExternalStorageDirectory()
-        } catch (_: Exception) {
-            null
-        } ?: return
-
-        val primaryPath = canonicalPathSafe(primaryRoot).trimEnd('/')
+        val match = resolveStorageVolumeMatch(context, dir) ?: return
+        val (rootPath, volumeName, _) = match
         val dirPath = canonicalPathSafe(dir).trimEnd('/')
-        if (dirPath != primaryPath && !dirPath.startsWith("$primaryPath/")) return
 
-        val relDir = if (dirPath == primaryPath) "" else dirPath.removePrefix("$primaryPath/").trim('/')
+        val relDir = if (dirPath == rootPath) "" else dirPath.removePrefix("$rootPath/").trim('/')
         val relPrefix = if (relDir.isEmpty()) "" else "$relDir/"
 
         val collections = buildList {
+            add(MediaStore.Images.Media.getContentUri(volumeName))
+            add(MediaStore.Video.Media.getContentUri(volumeName))
+            add(MediaStore.Audio.Media.getContentUri(volumeName))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(MediaStore.Downloads.getContentUri("external"))
+                add(MediaStore.Downloads.getContentUri(volumeName))
             }
-            add(MediaStore.Files.getContentUri("external"))
+            add(MediaStore.Files.getContentUri(volumeName))
         }
         val projection = buildList {
             add(MediaStore.MediaColumns._ID)
@@ -775,8 +831,8 @@ object DeviceBrowser {
                         val rawRelPath = if (relCol != -1) c.getString(relCol) else null
                         val itemRelDir = when {
                             rawRelPath != null -> rawRelPath.trim('/')
-                            dataPath != null && dataPath.startsWith("$primaryPath/") -> {
-                                dataPath.removePrefix("$primaryPath/")
+                            dataPath != null && dataPath.startsWith("$rootPath/", ignoreCase = true) -> {
+                                dataPath.substring(rootPath.length + 1)
                                     .substringBeforeLast('/', "")
                                     .trim('/')
                             }

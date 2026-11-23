@@ -1,6 +1,15 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,13 +32,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,15 +55,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.model.formatBytes
 import com.example.picker.BrowserEntry
 import com.example.picker.BrowserPathCrumb
 import com.example.picker.BrowserStorageRoot
 import com.example.picker.DeviceBrowser
+import com.example.picker.StorageKind
 import com.example.ui.components.AppIcons
 import com.example.ui.components.getFileIcon
 import com.example.ui.theme.AmberGold
@@ -60,39 +78,162 @@ import com.example.ui.theme.DeepAmber
 fun FilesBrowserSection(
     hasMediaPermission: Boolean,
     selectedEntries: SnapshotStateMap<String, BrowserEntry>,
-    bottomPadding: Dp
+    bottomPadding: Dp,
+    onExternalPermissionLaunch: () -> Unit = {},
+    onAllFilesPermissionChanged: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val colors = MaterialTheme.colorScheme
 
+    var hasAllFilesAccess by remember { mutableStateOf(DeviceBrowser.hasAllFilesAccess(context)) }
+    var permissionReloadTick by remember { mutableIntStateOf(0) }
+    var pendingOpenExternal by remember { mutableStateOf(false) }
+
+    val sessionTreeUris = remember { mutableStateListOf<Uri>() }
     var storageRoots by remember { mutableStateOf<List<BrowserStorageRoot>>(emptyList()) }
     var activeRootId by remember { mutableStateOf<String?>(null) }
     val breadcrumbs = remember { mutableStateListOf<BrowserPathCrumb>() }
     var entries by remember { mutableStateOf<List<BrowserEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    fun openRoot(root: BrowserStorageRoot) {
-        val crumb = DeviceBrowser.initialCrumbFor(root) ?: return
+    fun openRoot(root: BrowserStorageRoot): Boolean {
+        val crumb = DeviceBrowser.initialCrumbFor(root) ?: return false
         activeRootId = root.id
         breadcrumbs.clear()
         breadcrumbs.add(crumb)
+        return true
     }
 
-    LaunchedEffect(hasMediaPermission) {
-        val discovered = DeviceBrowser.discoverStorageRoots(context).filter { it.isDirectlyReadable }
+    val allFilesSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        val granted = DeviceBrowser.hasAllFilesAccess(context)
+        val changed = granted != hasAllFilesAccess
+        hasAllFilesAccess = granted
+        permissionReloadTick++
+        if (changed) {
+            onAllFilesPermissionChanged()
+        }
+    }
+
+    val legacyStoragePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        val granted = DeviceBrowser.hasAllFilesAccess(context)
+        val changed = granted != hasAllFilesAccess
+        hasAllFilesAccess = granted
+        permissionReloadTick++
+        if (changed || granted) {
+            onAllFilesPermissionChanged()
+        }
+    }
+
+    val safVolumeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val treeUri = result.data?.data
+        if (result.resultCode == Activity.RESULT_OK && treeUri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            if (!sessionTreeUris.contains(treeUri)) {
+                sessionTreeUris.add(treeUri)
+            }
+            activeRootId = "saf:$treeUri"
+            breadcrumbs.clear()
+            permissionReloadTick++
+        }
+    }
+
+    fun launchAllFilesPermission() {
+        onExternalPermissionLaunch()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val appIntent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.fromParts("package", context.packageName, null)
+            )
+            val launched = try {
+                allFilesSettingsLauncher.launch(appIntent)
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (!launched) {
+                try {
+                    allFilesSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                } catch (_: Exception) {
+                    Toast.makeText(context, "Unable to open All Files Access settings", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            legacyStoragePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val nowGranted = DeviceBrowser.hasAllFilesAccess(context)
+                if (nowGranted != hasAllFilesAccess) {
+                    hasAllFilesAccess = nowGranted
+                    permissionReloadTick++
+                    onAllFilesPermissionChanged()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(hasMediaPermission, hasAllFilesAccess, permissionReloadTick, sessionTreeUris.size) {
+        val discovered = DeviceBrowser.discoverStorageRoots(context, sessionTreeUris.toList())
         storageRoots = discovered
+
+        if (pendingOpenExternal) {
+            val readableExternal = discovered.firstOrNull {
+                it.kind != StorageKind.INTERNAL && it.isDirectlyReadable
+            }
+            if (readableExternal != null && openRoot(readableExternal)) {
+                pendingOpenExternal = false
+                return@LaunchedEffect
+            }
+            pendingOpenExternal = false
+        }
+
+        val safRequestedRoot = activeRootId?.takeIf { it.startsWith("saf:") }
+            ?.let { targetId -> discovered.firstOrNull { it.id == targetId && it.isDirectlyReadable } }
+        if (safRequestedRoot != null && breadcrumbs.isEmpty()) {
+            openRoot(safRequestedRoot)
+            return@LaunchedEffect
+        }
+
+        val currentRoot = activeRootId?.let { id -> discovered.firstOrNull { it.id == id } }
         if (breadcrumbs.isEmpty()) {
-            val defaultRoot = discovered.firstOrNull()
+            val defaultRoot = discovered.firstOrNull { it.kind == StorageKind.INTERNAL && it.isDirectlyReadable }
+                ?: discovered.firstOrNull { it.isDirectlyReadable }
             if (defaultRoot != null) {
                 openRoot(defaultRoot)
             } else {
                 isLoading = false
             }
+        } else if (currentRoot != null && currentRoot.isDirectlyReadable && breadcrumbs.size == 1) {
+            // Re-seed root crumb if root became directly readable after permission grant
+            val currentCrumb = breadcrumbs.firstOrNull()
+            val refreshedCrumb = DeviceBrowser.initialCrumbFor(currentRoot)
+            if (refreshedCrumb != null && refreshedCrumb != currentCrumb) {
+                breadcrumbs[0] = refreshedCrumb
+            }
         }
     }
 
     val currentCrumb = breadcrumbs.lastOrNull()
-    LaunchedEffect(currentCrumb, hasMediaPermission) {
+    LaunchedEffect(currentCrumb, hasMediaPermission, hasAllFilesAccess, permissionReloadTick) {
         if (currentCrumb == null) {
             entries = emptyList()
             isLoading = false
@@ -109,28 +250,135 @@ fun FilesBrowserSection(
         }
     }
 
+    val internalRoot = storageRoots.firstOrNull { it.kind == StorageKind.INTERNAL }
+    val externalRoots = storageRoots.filter { it.kind != StorageKind.INTERNAL }
+    val primaryExternalRoot = externalRoots.firstOrNull { it.isDirectlyReadable } ?: externalRoots.firstOrNull()
+    val extraExternalRoots = if (primaryExternalRoot != null) {
+        externalRoots.filter { it.id != primaryExternalRoot.id && it.isDirectlyReadable }
+    } else {
+        emptyList()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .testTag("files_browser_section")
     ) {
-        // Storage switcher (shown only when multiple readable storage volumes exist, without USB/Folder icons)
-        if (storageRoots.size > 1) {
+        // Equal-distance Internal Storage & External Storage buttons
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StorageRootChip(
+                label = "Internal Storage",
+                selected = internalRoot != null && activeRootId == internalRoot.id,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("storage_root_internal"),
+                onClick = {
+                    if (internalRoot != null && openRoot(internalRoot)) {
+                        pendingOpenExternal = false
+                    } else if (!hasAllFilesAccess) {
+                        launchAllFilesPermission()
+                    }
+                }
+            )
+            StorageRootChip(
+                label = primaryExternalRoot?.label ?: "External Storage",
+                selected = primaryExternalRoot != null && activeRootId == primaryExternalRoot.id,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("storage_root_external"),
+                onClick = {
+                    when {
+                        primaryExternalRoot != null && primaryExternalRoot.isDirectlyReadable -> {
+                            openRoot(primaryExternalRoot)
+                        }
+                        primaryExternalRoot != null && !hasAllFilesAccess -> {
+                            pendingOpenExternal = true
+                            launchAllFilesPermission()
+                        }
+                        primaryExternalRoot?.storageVolume != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                            onExternalPermissionLaunch()
+                            safVolumeLauncher.launch(primaryExternalRoot.storageVolume.createOpenDocumentTreeIntent())
+                        }
+                        else -> {
+                            Toast.makeText(context, "No external storage connected", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            )
+        }
+
+        if (extraExternalRoots.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+                    .testTag("extra_storage_roots_row"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                storageRoots.forEach { root ->
-                    val isSelected = activeRootId == root.id
+                extraExternalRoots.forEach { extraRoot ->
                     StorageRootChip(
-                        label = root.label,
-                        selected = isSelected,
-                        modifier = Modifier.testTag("storage_root_${root.kind.name.lowercase()}"),
-                        onClick = { openRoot(root) }
+                        label = extraRoot.label,
+                        selected = activeRootId == extraRoot.id,
+                        modifier = Modifier.testTag("storage_root_${extraRoot.kind.name.lowercase()}"),
+                        onClick = { openRoot(extraRoot) }
+                    )
+                }
+            }
+        }
+
+        if (!hasAllFilesAccess) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AmberGold.copy(alpha = 0.14f))
+                    .border(1.dp, AmberGold.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("all_files_permission_banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Allow All Files Permission",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Browse videos, music, APKs & all file types",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Button(
+                    onClick = { launchAllFilesPermission() },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberGold,
+                        contentColor = Color.Black
+                    ),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("grant_all_files_button")
+                ) {
+                    Text(
+                        text = "Allow",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -350,12 +598,12 @@ private fun StorageRootChip(
 
     Box(
         modifier = modifier
-            .heightIn(min = 40.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
             .border(if (selected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -363,7 +611,9 @@ private fun StorageRootChip(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             color = contentColor,
-            maxLines = 1
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
         )
     }
 }
