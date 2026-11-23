@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Big Share"
+rootProject.name = "Max Share"
 
 include(":app")

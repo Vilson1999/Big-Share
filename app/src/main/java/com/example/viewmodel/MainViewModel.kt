@@ -13,6 +13,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.cache.TempFileCacheManager
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
 import com.example.model.FileItem
@@ -24,6 +25,7 @@ import com.example.p2p.WifiDirectManager
 import com.example.picker.DeviceMediaScanner
 import com.example.picker.PickerAppItem
 import com.example.picker.PickerMediaItem
+import com.example.picker.PickerThumbnailCache
 import com.example.transfer.FileTransferEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -83,6 +85,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var mediaPreloadJob: Job? = null
     private var filesPreloadJob: Job? = null
     private var appsPreloadJob: Job? = null
+    private var cacheBuildJob: Job? = null
     private var hasCompletedMediaScan = false
     private var hasCompletedFilesScan = false
     private var hasCompletedAppsScan = false
@@ -245,10 +248,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        const val DEFAULT_RECEIVE_LOCATION_LABEL = "Downloads/Big Share"
+        const val DEFAULT_RECEIVE_LOCATION_LABEL = "Downloads/Max Share"
     }
 
     init {
+        TempFileCacheManager.openSession(application, cleanStale = true)
         preloadDeviceFilesOnStartup()
         viewModelScope.launch {
             wifiDirectManager.connectionInfo.collect { info ->
@@ -316,6 +320,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _pickerMusic.value = mus
                 }
                 hasCompletedMediaScan = true
+                persistTempCache(includeMedia = true)
             } finally {
                 _isScanningMedia.value = false
             }
@@ -335,6 +340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 hasCompletedFilesScan = true
+                persistTempCache(includeFiles = true)
             } finally {
                 _isScanningFiles.value = false
             }
@@ -357,8 +363,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 hasCompletedAppsScan = true
+                persistTempCache(includeApps = true)
             } finally {
                 _isScanningApps.value = false
+            }
+        }
+    }
+
+    private fun persistTempCache(
+        includeMedia: Boolean = false,
+        includeFiles: Boolean = false,
+        includeApps: Boolean = false
+    ) {
+        val app = getApplication<Application>()
+        if (!TempFileCacheManager.isSessionActive()) return
+        val shouldWriteMedia = includeMedia && hasCompletedMediaScan
+        val shouldWriteFiles = includeFiles && hasCompletedFilesScan
+        val shouldWriteApps = includeApps && hasCompletedAppsScan
+        if (!shouldWriteMedia && !shouldWriteFiles && !shouldWriteApps) return
+
+        val previousJob = cacheBuildJob
+        cacheBuildJob = viewModelScope.launch {
+            previousJob?.join()
+            if (!TempFileCacheManager.isSessionActive()) return@launch
+            if (shouldWriteMedia) {
+                TempFileCacheManager.writeMediaIndex(app, "images", _pickerImages.value)
+                TempFileCacheManager.writeMediaIndex(app, "videos", _pickerVideos.value)
+                TempFileCacheManager.writeMediaIndex(app, "music", _pickerMusic.value)
+            }
+            if (shouldWriteFiles) {
+                TempFileCacheManager.writeMediaIndex(app, "files", _pickerFiles.value)
+            }
+            if (shouldWriteApps) {
+                TempFileCacheManager.writeAppsIndex(app, "installed_apps", _pickerInstalledApps.value)
+                TempFileCacheManager.writeAppsIndex(app, "apk_files", _pickerApkFiles.value)
+            }
+            if (shouldWriteMedia || shouldWriteApps) {
+                PickerThumbnailCache.prewarmThumbnails(
+                    context = app,
+                    images = if (shouldWriteMedia) _pickerImages.value else emptyList(),
+                    apps = if (shouldWriteApps) _pickerInstalledApps.value else emptyList()
+                )
             }
         }
     }
@@ -722,13 +767,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppForegrounded() {
+        TempFileCacheManager.openSession(getApplication(), cleanStale = false)
         wifiDirectManager.ensureRegistered()
         ensurePickerFilesLoaded()
+        persistTempCache(includeMedia = true, includeFiles = true, includeApps = true)
     }
 
     fun onAppBackgrounded() {
+        cacheBuildJob?.cancel()
         resetToHome()
         wifiDirectManager.unregister()
+        PickerThumbnailCache.clearMemoryCache()
+        TempFileCacheManager.closeSessionAsync(getApplication())
     }
 
     fun resetToHome() {
@@ -748,8 +798,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        cacheBuildJob?.cancel()
         stopDiscoveryLoop()
         cancelAllTransfers()
         wifiDirectManager.unregister()
+        PickerThumbnailCache.clearMemoryCache()
+        TempFileCacheManager.closeSessionBlocking(getApplication())
     }
 }

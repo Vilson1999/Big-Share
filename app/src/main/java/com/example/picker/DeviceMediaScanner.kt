@@ -23,6 +23,7 @@ import android.util.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
+import com.example.cache.TempFileCacheManager
 import com.example.model.FileItem
 import com.example.model.TransferStatus
 import kotlinx.coroutines.Dispatchers
@@ -31,10 +32,10 @@ import java.io.File
 import java.util.UUID
 
 enum class PickerCategory(val label: String) {
-    APPS("Apps"),
     IMAGE("Image"),
     VIDEO("Video"),
     MUSIC("Music"),
+    APPS("Apps"),
     FILES("Files")
 }
 
@@ -113,11 +114,35 @@ object PickerThumbnailCache {
 
     fun getCached(key: String): ImageBitmap? = cache.get(key)
 
+    fun clearMemoryCache() {
+        cache.evictAll()
+    }
+
+    suspend fun prewarmThumbnails(
+        context: Context,
+        images: List<PickerMediaItem>,
+        apps: List<PickerAppItem>,
+        maxImages: Int = 24,
+        maxApps: Int = 20
+    ) {
+        if (!TempFileCacheManager.isSessionActive()) return
+        for (item in images.take(maxImages)) {
+            if (!TempFileCacheManager.isSessionActive()) return
+            loadImageThumbnail(context, item.uriString)
+        }
+        for (app in apps.take(maxApps)) {
+            if (!TempFileCacheManager.isSessionActive()) return
+            loadAppIcon(context, app)
+        }
+    }
+
     suspend fun loadImageThumbnail(context: Context, uriString: String): ImageBitmap? {
         val key = "img:$uriString"
         cache.get(key)?.let { return it }
 
         val bitmap = withContext(Dispatchers.IO) {
+            TempFileCacheManager.readThumbnailBitmap(context, key)?.let { return@withContext it }
+
             try {
                 val uri = Uri.parse(uriString)
                 val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
@@ -137,7 +162,7 @@ object PickerThumbnailCache {
                 } ?: return@withContext null
 
                 // Ensure exact 250px x 250px center-cropped thumbnail
-                if (decoded.width == IMAGE_THUMB_PX && decoded.height == IMAGE_THUMB_PX) {
+                val finalBitmap = if (decoded.width == IMAGE_THUMB_PX && decoded.height == IMAGE_THUMB_PX) {
                     decoded
                 } else {
                     ThumbnailUtils.extractThumbnail(
@@ -146,6 +171,8 @@ object PickerThumbnailCache {
                         IMAGE_THUMB_PX
                     )
                 }
+                TempFileCacheManager.writeThumbnailBitmap(context, key, finalBitmap)
+                finalBitmap
             } catch (_: Exception) {
                 null
             }
@@ -163,6 +190,8 @@ object PickerThumbnailCache {
         cache.get(key)?.let { return it }
 
         val bitmap = withContext(Dispatchers.IO) {
+            TempFileCacheManager.readThumbnailBitmap(context, key)?.let { return@withContext it }
+
             try {
                 val pm = context.packageManager
                 val drawable = if (!item.isStandaloneApk && item.packageName.isNotBlank()) {
@@ -177,7 +206,11 @@ object PickerThumbnailCache {
                         null
                     }
                 }
-                drawable?.let { drawableToBitmap(it, 160) }
+                val iconBitmap = drawable?.let { drawableToBitmap(it, 160) }
+                if (iconBitmap != null) {
+                    TempFileCacheManager.writeThumbnailBitmap(context, key, iconBitmap)
+                }
+                iconBitmap
             } catch (_: Exception) {
                 null
             }
@@ -205,7 +238,7 @@ object PickerThumbnailCache {
     }
 
     private fun loadIconFromContentUri(context: Context, pm: PackageManager, uri: Uri): Drawable? {
-        val tempFile = File.createTempFile("apk_icon_", ".apk", context.cacheDir)
+        val tempFile = TempFileCacheManager.createTempWorkFile(context, "apk_icon_", ".apk")
         return try {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tempFile.outputStream().use { output ->
@@ -733,21 +766,18 @@ object DeviceMediaScanner {
         }
     }
 
-    private fun scanApkStorageRootsFallback(
-        context: Context,
-        out: MutableList<PickerAppItem>,
-        seenPaths: MutableSet<String>,
-        seenSig: MutableSet<String>,
-        onItemAdded: () -> Unit = {}
-    ) {
+    private fun collectPriorityScanDirs(
+        roots: List<File>,
+        commonSubdirs: List<String>
+    ): Collection<File> {
         val priorityDirs = LinkedHashMap<String, File>()
         try {
             @Suppress("DEPRECATION")
             val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             if (downloads != null && downloads.exists() && downloads.canRead()) {
-                val bigShareDir = File(downloads, "Big Share")
-                if (bigShareDir.exists() && bigShareDir.canRead()) {
-                    priorityDirs[canonicalDirKey(bigShareDir)] = bigShareDir
+                val appShareDir = File(downloads, "Max Share")
+                if (appShareDir.exists() && appShareDir.canRead()) {
+                    priorityDirs[canonicalDirKey(appShareDir)] = appShareDir
                 }
                 priorityDirs[canonicalDirKey(downloads)] = downloads
             }
@@ -760,22 +790,31 @@ object DeviceMediaScanner {
             }
         } catch (_: Exception) {}
 
-        val commonApkSubdirs = listOf(
-            "Download", "Downloads", "APKs", "Apk", "App", "Apps", "Backup", "Backups",
-            "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp", "Android/media"
-        )
-        val roots = collectStorageRoots(context)
         for (rootDir in roots) {
-            for (sub in commonApkSubdirs) {
+            for (sub in commonSubdirs) {
                 val candidate = File(rootDir, sub)
                 if (candidate.exists() && candidate.isDirectory && candidate.canRead()) {
                     priorityDirs.putIfAbsent(canonicalDirKey(candidate), candidate)
                 }
             }
         }
+        return priorityDirs.values
+    }
 
+    private fun scanApkStorageRootsFallback(
+        context: Context,
+        out: MutableList<PickerAppItem>,
+        seenPaths: MutableSet<String>,
+        seenSig: MutableSet<String>,
+        onItemAdded: () -> Unit = {}
+    ) {
+        val commonApkSubdirs = listOf(
+            "Download", "Downloads", "APKs", "Apk", "App", "Apps", "Backup", "Backups",
+            "Shareit", "Xender", "Bluetooth", "Telegram", "WhatsApp", "Android/media"
+        )
+        val roots = collectStorageRoots(context)
         val visitedDirs = HashSet<String>()
-        for (dir in priorityDirs.values) {
+        for (dir in collectPriorityScanDirs(roots, commonApkSubdirs)) {
             walkApkDirectory(context, dir, 0, out, seenPaths, seenSig, visitedDirs, onItemAdded)
         }
         for (rootDir in roots) {
@@ -1128,39 +1167,10 @@ object DeviceMediaScanner {
         seenSig: MutableSet<String>,
         onItemAdded: () -> Unit = {}
     ) {
-        val priorityDirs = LinkedHashMap<String, File>()
-        try {
-            @Suppress("DEPRECATION")
-            val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (downloads != null && downloads.exists() && downloads.canRead()) {
-                val bigShareDir = File(downloads, "Big Share")
-                if (bigShareDir.exists() && bigShareDir.canRead()) {
-                    priorityDirs[canonicalDirKey(bigShareDir)] = bigShareDir
-                }
-                priorityDirs[canonicalDirKey(downloads)] = downloads
-            }
-        } catch (_: Exception) {}
-        try {
-            @Suppress("DEPRECATION")
-            val documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            if (documents != null && documents.exists() && documents.canRead()) {
-                priorityDirs[canonicalDirKey(documents)] = documents
-            }
-        } catch (_: Exception) {}
-
         val roots = collectStorageRoots(context)
-        val commonSubdirs = listOf("Download", "Downloads", "Documents", "Big Share", "Bluetooth", "Telegram", "WhatsApp", "Shareit", "Xender", "Android/media")
-        for (rootDir in roots) {
-            for (sub in commonSubdirs) {
-                val candidate = File(rootDir, sub)
-                if (candidate.exists() && candidate.isDirectory && candidate.canRead()) {
-                    priorityDirs.putIfAbsent(canonicalDirKey(candidate), candidate)
-                }
-            }
-        }
-
+        val commonSubdirs = listOf("Download", "Downloads", "Documents", "Max Share", "Big Share", "Bluetooth", "Telegram", "WhatsApp", "Shareit", "Xender", "Android/media")
         val visitedDirs = HashSet<String>()
-        for (dir in priorityDirs.values) {
+        for (dir in collectPriorityScanDirs(roots, commonSubdirs)) {
             walkFilesDirectory(dir, 0, out, seenPaths, seenSig, visitedDirs, onItemAdded)
         }
         for (rootDir in roots) {

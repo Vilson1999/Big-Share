@@ -36,7 +36,7 @@ import com.example.ui.components.atmosphericGlow
 fun ReceiveScreen(
     userName: String,
     userAvatarIndex: Int = 0,
-    receiveLocationLabel: String = "Downloads/Big Share",
+    receiveLocationLabel: String = "Downloads/Max Share",
     onBackClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -100,7 +100,7 @@ fun ReceiveScreen(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = userName.ifBlank { "Big Share User" },
+                                text = userName.ifBlank { "Max Share User" },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = colors.onSurface,
                                 fontWeight = FontWeight.Bold

@@ -57,8 +57,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.cache.TempFileCacheManager
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
+import com.example.picker.PickerThumbnailCache
 import com.example.ui.screens.FilePickerScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ProfileScreen
@@ -129,6 +131,14 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) {
+            PickerThumbnailCache.clearMemoryCache()
+            TempFileCacheManager.closeSessionBlocking(applicationContext)
+        }
+        super.onDestroy()
     }
 
     private fun handleShareIntent(intent: Intent?) {

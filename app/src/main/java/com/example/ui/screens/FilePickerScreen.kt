@@ -257,13 +257,13 @@ fun FilePickerScreen(
                 }
             )
 
-            // 5-Category Pill Icon Menu (Image, Video, Music, Files, Apps)
+            // 5-Category Pill Icon Menu (Image, Video, Music, Apps, Files)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 PickerCategory.entries.forEach { category ->
@@ -836,49 +836,55 @@ private fun CategoryPillChip(
     val iconColor = if (selected) Color.White else accentColor
     val textColor = if (selected) Color.White else colors.onSurface
 
-    Row(
+    Box(
         modifier = modifier
             .heightIn(min = 48.dp)
             .clip(CircleShape)
-            .background(bgColor)
-            .border(if (selected) 2.dp else 1.5.dp, borderColor, CircleShape)
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = iconColor,
-            modifier = Modifier.size(18.dp)
-        )
-        Text(
-            text = label,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = textColor,
-            maxLines = 1
-        )
-        if (count > 0) {
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(
-                        if (selected) Color.White.copy(alpha = 0.24f)
-                        else selectedColor.copy(alpha = 0.34f)
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(bgColor)
+                .border(if (selected) 1.5.dp else 1.dp, borderColor, CircleShape)
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = iconColor,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = textColor,
+                maxLines = 1
+            )
+            if (count > 0) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) Color.White.copy(alpha = 0.24f)
+                            else selectedColor.copy(alpha = 0.34f)
+                        )
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor,
+                        maxLines = 1
                     )
-                    .padding(horizontal = 7.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = count.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor,
-                    maxLines = 1
-                )
+                }
             }
         }
     }

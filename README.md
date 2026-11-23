@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Vilson1999/Big-Share/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" alt="Big Share app icon" width="180" />
+  <img src="https://raw.githubusercontent.com/Vilson1999/Big-Share/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" alt="Max Share app icon" width="180" />
 </p>
 
-<h1 align="center">Big Share</h1>
+<h1 align="center">Max Share</h1>
 
 <p align="center">
   <strong>Developer:</strong> Vilson Sonkar<br />
@@ -21,7 +21,7 @@ Choose files on your device, discover nearby peers, and send selected files dire
 
 ### Receive
 
-Make your device discoverable to nearby Big Share devices and prepare to receive incoming files. Received files are saved in the Downloads folder when supported by the device.
+Make your device discoverable to nearby Max Share devices and prepare to receive incoming files. Received files are saved in the Downloads folder when supported by the device.
 
 ### Transfer
 
@@ -37,14 +37,14 @@ Bluetooth discovery helpers assist nearby-device discovery alongside Android Wi-
 
 ### Profiles and sharing
 
-Set a display name and avatar for nearby-device identification. Files can also be shared to Big Share from Android's system share menu.
+Set a display name and avatar for nearby-device identification. Files can also be shared to Max Share from Android's system share menu.
 
 ## Releases and Updates
 
 The latest published release is **v1.0.9**. The project publishes separate APK downloads for ARMv7 and ARMv8 devices. Open the [latest release](https://github.com/Vilson1999/Big-Share/releases/latest) for APK downloads and release notes.
 
-- [ARMv7 (`armeabi-v7a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MiniShare-armv7-armeabi-v7a.apk)
-- [ARMv8 (`arm64-v8a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MiniShare-armv8-arm64-v8a.apk)
+- [ARMv7 (`armeabi-v7a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MaxShare-armv7-armeabi-v7a.apk)
+- [ARMv8 (`arm64-v8a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MaxShare-armv8-arm64-v8a.apk)
 
 GitHub Actions builds and publishes APKs when code is pushed to the configured branches or a version tag is pushed. For builds without a version tag, the release tag is generated automatically from the app version and build configuration.
 

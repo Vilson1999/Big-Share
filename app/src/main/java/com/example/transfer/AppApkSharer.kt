@@ -23,7 +23,7 @@ object AppApkSharer {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "application/vnd.android.package-archive"
             putExtra(Intent.EXTRA_STREAM, apkUri)
-            putExtra(Intent.EXTRA_SUBJECT, "Big Share")
+            putExtra(Intent.EXTRA_SUBJECT, "Max Share")
             clipData = ClipData.newUri(context.contentResolver, apkFile.name, apkUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -59,7 +59,7 @@ object AppApkSharer {
             null
         }
 
-        val fileName = if (versionName != null) "Big_Share_v${versionName}.apk" else "Big_Share.apk"
+        val fileName = if (versionName != null) "Max_Share_v${versionName}.apk" else "Max_Share.apk"
         val sharedDir = File(context.cacheDir, "shared_apk").apply { mkdirs() }
         val targetFile = File(sharedDir, fileName)
 

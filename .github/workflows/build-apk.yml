@@ -1,4 +1,4 @@
-name: Build Big Share APKs (ARMv7 & ARMv8)
+name: Build Max Share APKs (ARMv7 & ARMv8)
 
 on:
   push:
@@ -116,13 +116,13 @@ jobs:
             echo "STORE_PASSWORD=android" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=android" >> "$GITHUB_ENV"
           else
-            DEFAULT_PASS="minishare_release_key"
+            DEFAULT_PASS="maxshare_release_key"
             keytool -genkeypair -noprompt \
               -keystore "$KEYSTORE_OUT" \
               -alias upload \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass "$DEFAULT_PASS" -keypass "$DEFAULT_PASS" \
-              -dname "CN=Vilson Sonkar, O=Big Share, C=IN"
+              -dname "CN=Vilson Sonkar, O=Max Share, C=IN"
             echo "KEYSTORE_PATH=$KEYSTORE_OUT" >> "$GITHUB_ENV"
             echo "STORE_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
             echo "KEY_PASSWORD=$DEFAULT_PASS" >> "$GITHUB_ENV"
@@ -152,8 +152,8 @@ jobs:
             exit 1
           fi
 
-          ARMV7_OUT="${{ github.workspace }}/release-apks/MiniShare-armv7-armeabi-v7a.apk"
-          ARMV8_OUT="${{ github.workspace }}/release-apks/MiniShare-armv8-arm64-v8a.apk"
+          ARMV7_OUT="${{ github.workspace }}/release-apks/MaxShare-armv7-armeabi-v7a.apk"
+          ARMV8_OUT="${{ github.workspace }}/release-apks/MaxShare-armv8-arm64-v8a.apk"
           cp "$ARMV7_SRC" "$ARMV7_OUT"
           cp "$ARMV8_SRC" "$ARMV8_OUT"
 
@@ -214,10 +214,10 @@ jobs:
 
           NOTES_FILE="${{ github.workspace }}/release-apks/release-notes.md"
           {
-            echo "## Big Share (${RELEASE_TAG})"
+            echo "## Max Share (${RELEASE_TAG})"
             echo ""
             echo "### App Details"
-            echo "- **App Name:** Big Share"
+            echo "- **App Name:** Max Share"
             echo "- **Package ID:** \`com.big.share\`"
             echo "- **Version:** ${APP_VERSION_NAME} (Build ${APP_VERSION_CODE})"
             echo "- **Developer:** Vilson Sonkar"
@@ -231,8 +231,8 @@ jobs:
             echo ""
             echo "| Architecture | APK File | Size |"
             echo "|---|---|---|"
-            echo "| ARMv7 (\`armeabi-v7a\`) | \`MiniShare-armv7-armeabi-v7a.apk\` | ${ARMV7_SIZE} |"
-            echo "| ARMv8 (\`arm64-v8a\`) | \`MiniShare-armv8-arm64-v8a.apk\` | ${ARMV8_SIZE} |"
+            echo "| ARMv7 (\`armeabi-v7a\`) | \`MaxShare-armv7-armeabi-v7a.apk\` | ${ARMV7_SIZE} |"
+            echo "| ARMv8 (\`arm64-v8a\`) | \`MaxShare-armv8-arm64-v8a.apk\` | ${ARMV8_SIZE} |"
             echo ""
             echo "### New Features"
             printf '%s' "$NEW_FEATURES_LIST"
@@ -247,22 +247,22 @@ jobs:
       - name: Upload ARMv7 APK Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: MiniShare-armv7-apk
-          path: release-apks/MiniShare-armv7-armeabi-v7a.apk
+          name: MaxShare-armv7-apk
+          path: release-apks/MaxShare-armv7-armeabi-v7a.apk
 
       - name: Upload ARMv8 APK Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: MiniShare-armv8-apk
-          path: release-apks/MiniShare-armv8-arm64-v8a.apk
+          name: MaxShare-armv8-apk
+          path: release-apks/MaxShare-armv8-arm64-v8a.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.apks.outputs.release_tag }}"
-          ARMV7_FILE="release-apks/MiniShare-armv7-armeabi-v7a.apk"
-          ARMV8_FILE="release-apks/MiniShare-armv8-arm64-v8a.apk"
+          ARMV7_FILE="release-apks/MaxShare-armv7-armeabi-v7a.apk"
+          ARMV8_FILE="release-apks/MaxShare-armv8-arm64-v8a.apk"
           NOTES_FILE="release-apks/release-notes.md"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -270,7 +270,7 @@ jobs:
             gh release edit "$TAG" --notes-file "$NOTES_FILE"
           else
             gh release create "$TAG" "$ARMV7_FILE" "$ARMV8_FILE" \
-              --title "Big Share $TAG" \
+              --title "Max Share $TAG" \
               --latest \
               --notes-file "$NOTES_FILE"
           fi

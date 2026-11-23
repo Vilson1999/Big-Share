@@ -39,10 +39,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.components.AppIcons
 import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
@@ -191,6 +193,16 @@ fun HomeScreen(
                     )
                 }
             }
+
+            Text(
+                text = stringResource(R.string.developer_name),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .testTag("home_developer_name_text")
+            )
         }
     }
 }

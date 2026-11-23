@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">Big Share</string>
+    <string name="app_name">Max Share</string>
+    <string name="developer_name">Vilson Sonkar</string>
+    <string name="developer_credit">Developed by Vilson Sonkar</string>
 </resources>

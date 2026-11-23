@@ -28,7 +28,7 @@ class ExampleRobolectricTest {
   fun readStringFromContext() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Big Share", appName)
+    assertEquals("Max Share", appName)
     assertEquals("com.big.share", context.packageName)
   }
 
@@ -118,7 +118,7 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val engine = com.example.transfer.FileTransferEngine(context)
     val dest = engine.getFallbackFile("../../sample.txt")
-    assertEquals("Big Share", dest.parentFile?.name)
+    assertEquals("Max Share", dest.parentFile?.name)
     assertEquals("sample.txt", dest.name)
     assertEquals("notes", engine.sanitizeFileName("/evil/path/notes"))
   }
@@ -252,7 +252,7 @@ class ExampleRobolectricTest {
     val nestedDest = engine.getFallbackFile("photo.jpg", "Vacation/Day2")
     assertEquals("Day2", nestedDest.parentFile?.name)
     assertEquals("Vacation", nestedDest.parentFile?.parentFile?.name)
-    assertEquals("Big Share", nestedDest.parentFile?.parentFile?.parentFile?.name)
+    assertEquals("Max Share", nestedDest.parentFile?.parentFile?.parentFile?.name)
 
     val tempFolder = File(context.cacheDir, "TestShareFolder").apply {
       deleteRecursively()

@@ -610,9 +610,9 @@ class FileTransferEngine(private val context: Context) {
             try {
                 val resolver: ContentResolver = context.contentResolver
                 val targetRelativePath = if (safeFolder.isNotEmpty()) {
-                    "${Environment.DIRECTORY_DOWNLOADS}/Big Share/$safeFolder"
+                    "${Environment.DIRECTORY_DOWNLOADS}/Max Share/$safeFolder"
                 } else {
-                    "${Environment.DIRECTORY_DOWNLOADS}/Big Share"
+                    "${Environment.DIRECTORY_DOWNLOADS}/Max Share"
                 }
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, safeName)
@@ -670,7 +670,7 @@ class FileTransferEngine(private val context: Context) {
                 null
             }
         } catch (e: Exception) {
-            Log.w("FileTransferEngine", "Custom receive storage unavailable, falling back to Downloads/Big Share", e)
+            Log.w("FileTransferEngine", "Custom receive storage unavailable, falling back to Downloads/Max Share", e)
             null
         }
     }
@@ -749,28 +749,18 @@ class FileTransferEngine(private val context: Context) {
     internal fun getFallbackFile(fileName: String, relativeFolder: String = ""): File {
         val safeName = sanitizeFileName(fileName)
         val safeFolder = sanitizeRelativeFolder(relativeFolder)
-        val publicMiniShare = File(
+        val publicAppDownloads = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "Big Share"
+            "Max Share"
         )
-        val baseDir = try {
-            if (!publicMiniShare.exists()) {
-                publicMiniShare.mkdirs()
-            }
-            if (publicMiniShare.exists() && publicMiniShare.canWrite()) {
-                publicMiniShare
-            } else {
-                File(
-                    context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
-                    "Big Share"
-                ).apply { mkdirs() }
-            }
-        } catch (_: Exception) {
-            File(
-                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
-                "Big Share"
-            ).apply { mkdirs() }
-        }
+        val writablePublic = runCatching {
+            if (!publicAppDownloads.exists()) publicAppDownloads.mkdirs()
+            publicAppDownloads.takeIf { it.exists() && it.canWrite() }
+        }.getOrNull()
+        val baseDir = writablePublic ?: File(
+            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
+            "Max Share"
+        ).apply { mkdirs() }
 
         val targetDir = if (safeFolder.isNotEmpty()) {
             File(baseDir, safeFolder).apply { mkdirs() }

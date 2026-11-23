@@ -66,7 +66,7 @@ fun ProfileScreen(
     initialAvatarIndex: Int,
     isFirstLaunch: Boolean,
     themeMode: AppThemeMode = AppThemeMode.DEFAULT,
-    receiveLocationLabel: String = "Downloads/Big Share",
+    receiveLocationLabel: String = "Downloads/Max Share",
     hasCustomReceiveLocation: Boolean = false,
     onThemeModeSelect: (AppThemeMode) -> Unit = {},
     onReceiveLocationSelected: (Uri?) -> Unit = {},
@@ -462,7 +462,7 @@ fun ProfileScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 560.dp)
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 8.dp)
             ) {
                 Button(
                     onClick = {
@@ -490,6 +490,17 @@ fun ProfileScreen(
                     )
                 }
             }
+
+            // Developer name at bottom last of user menu
+            Text(
+                text = androidx.compose.ui.res.stringResource(com.example.R.string.developer_credit),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .padding(bottom = 12.dp)
+                    .testTag("developer_name_text")
+            )
         }
     }
 }

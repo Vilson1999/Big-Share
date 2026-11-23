@@ -92,7 +92,7 @@ fun RadarScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = userName.ifBlank { "Big Share User" },
+                        text = userName.ifBlank { "Max Share User" },
                         style = MaterialTheme.typography.titleLarge,
                         color = colors.onSurface,
                         maxLines = 1,
@@ -230,7 +230,7 @@ fun RadarScreen(
                     itemsIndexed(peers) { index, device ->
                         val resolvedUserName = peerUserNames[device.deviceAddress]
                             ?.takeIf { it.isNotBlank() }
-                            ?: "Big Share User"
+                            ?: "Max Share User"
                         val resolvedAvatarIndex = peerAvatars[device.deviceAddress]
                         DeviceItemCard(
                             displayName = resolvedUserName,

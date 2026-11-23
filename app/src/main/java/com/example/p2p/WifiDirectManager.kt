@@ -24,7 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
 class WifiDirectManager(private val context: Context) {
 
     companion object {
-        private const val SERVICE_INSTANCE = "_bigshare"
+        private const val SERVICE_INSTANCE = "_maxshare"
+        private const val LEGACY_BIGSHARE_INSTANCE = "_bigshare"
         private const val LEGACY_SERVICE_INSTANCE = "_minishare"
         private const val SERVICE_TYPE = "_presence._tcp"
     }
@@ -113,7 +114,7 @@ class WifiDirectManager(private val context: Context) {
                 }
             }
         }
-        // Show peers advertising Big Share first
+        // Show peers advertising Max Share first
         _peerUserNames.value = HashMap(servicePeerNames)
         _peerAvatars.value = HashMap(servicePeerAvatars)
         _peers.value = merged.values.sortedByDescending {
@@ -206,7 +207,7 @@ class WifiDirectManager(private val context: Context) {
             onDone?.invoke()
             return
         }
-        val safeName = userName.trim().ifEmpty { "Big Share User" }
+        val safeName = userName.trim().ifEmpty { "Max Share User" }
         val record = mapOf(
             "name" to safeName,
             "avatar" to avatarIndex.coerceIn(0, 9).toString()
@@ -301,6 +302,7 @@ class WifiDirectManager(private val context: Context) {
         }
         val servListener = WifiP2pManager.DnsSdServiceResponseListener { instanceName, _, resourceType ->
             if (instanceName.equals(SERVICE_INSTANCE, ignoreCase = true) ||
+                instanceName.equals(LEGACY_BIGSHARE_INSTANCE, ignoreCase = true) ||
                 instanceName.equals(LEGACY_SERVICE_INSTANCE, ignoreCase = true)
             ) {
                 servicePeers[resourceType.deviceAddress] = resourceType
