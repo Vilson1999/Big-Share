@@ -15,8 +15,8 @@ android {
     applicationId = "com.big.share"
     minSdk = 28
     targetSdk = 36
-    versionCode = appVersionCodeProp ?: 11
-    versionName = appVersionNameProp ?: "1.0.11"
+    versionCode = appVersionCodeProp ?: 12
+    versionName = appVersionNameProp ?: "1.0.12"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     resourceConfigurations += listOf("en")

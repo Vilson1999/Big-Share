@@ -87,7 +87,7 @@ jobs:
             RELEASE_TAG="v1.0.${{ github.run_number }}"
           fi
           APP_VERSION_NAME="${RELEASE_TAG#v}"
-          APP_VERSION_CODE=$((100 + ${{ github.run_number }}))
+          APP_VERSION_CODE=$((1000 + ${{ github.run_number }}))
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "version_name=$APP_VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$APP_VERSION_CODE" >> "$GITHUB_OUTPUT"

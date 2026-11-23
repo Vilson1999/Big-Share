@@ -60,6 +60,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.cache.TempFileCacheManager
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
+import com.example.picker.DeviceBrowser
 import com.example.picker.PickerThumbnailCache
 import com.example.ui.screens.FilePickerScreen
 import com.example.ui.screens.HomeScreen
@@ -136,7 +137,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (!isChangingConfigurations) {
             PickerThumbnailCache.clearMemoryCache()
-            TempFileCacheManager.closeSessionBlocking(applicationContext)
+            if (!viewModel.isTransferActive.value) {
+                TempFileCacheManager.closeSessionBlocking(applicationContext)
+            }
         }
         super.onDestroy()
     }
@@ -237,12 +240,13 @@ private fun extractSharedUris(intent: Intent?): List<Uri> {
 
 internal fun getRequiredPermissions(): Array<String> {
     return when {
-        // Android 13 - 17 (API 33+): Wi-Fi Nearby + Bluetooth Nearby runtime permissions
+        // Android 13 - 17 (API 33+): Wi-Fi Nearby + Bluetooth Nearby + Notifications for background transfer
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
             Manifest.permission.NEARBY_WIFI_DEVICES,
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.POST_NOTIFICATIONS
         )
         // Android 12 / 12L (API 31-32): Bluetooth Nearby + Location for Wi-Fi P2P
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> arrayOf(
@@ -267,8 +271,10 @@ internal fun getRequiredPermissions(): Array<String> {
 }
 
 private fun hasAllPermissions(context: Context): Boolean {
-    val perms = getRequiredPermissions()
-    return perms.all {
+    val requiredPerms = getRequiredPermissions().filter {
+        it != Manifest.permission.POST_NOTIFICATIONS
+    }
+    return requiredPerms.all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 }
@@ -319,6 +325,8 @@ fun MainAppContent(
     var awaitingExternalModal by remember { mutableStateOf(false) }
     var isSharingApp by remember { mutableStateOf(false) }
     var missingSetting by remember { mutableStateOf<RequiredSetting?>(null) }
+    var hasPromptedAllFilesOnStart by remember { mutableStateOf(false) }
+    var showStartupAllFilesDialog by remember { mutableStateOf(false) }
 
     val proceedWithChecks: (() -> Unit) -> Unit = remember(context) {
         { action ->
@@ -358,6 +366,59 @@ fun MainAppContent(
         }
     }
 
+    val startupAllFilesSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        awaitingExternalModal = false
+        if (DeviceBrowser.hasAllFilesAccess(context)) {
+            viewModel.refreshMediaPermissionAndLoad(forceRefresh = true)
+        }
+    }
+
+    val startupLegacyStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        awaitingExternalModal = false
+        if (DeviceBrowser.hasAllFilesAccess(context)) {
+            viewModel.refreshMediaPermissionAndLoad(forceRefresh = true)
+        }
+    }
+
+    fun launchAllFilesPermissionAtStart() {
+        awaitingExternalModal = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val appIntent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.fromParts("package", context.packageName, null)
+            )
+            val launched = try {
+                startupAllFilesSettingsLauncher.launch(appIntent)
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (!launched) {
+                try {
+                    startupAllFilesSettingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                } catch (_: Exception) {
+                    awaitingExternalModal = false
+                }
+            }
+        } else {
+            startupLegacyStorageLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    // Ask for All Files permission at app start if not yet granted
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == AppScreen.HOME && !hasPromptedAllFilesOnStart) {
+            hasPromptedAllFilesOnStart = true
+            if (!DeviceBrowser.hasAllFilesAccess(context)) {
+                showStartupAllFilesDialog = true
+            }
+        }
+    }
+
     // Settings launcher
     val settingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -371,9 +432,12 @@ fun MainAppContent(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         awaitingExternalModal = false
-        val allGranted = grants.values.all { it }
+        val requiredGranted = grants
+            .filterKeys { it != Manifest.permission.POST_NOTIFICATIONS }
+            .values
+            .all { it }
         val action = pendingAction
-        if (allGranted && action != null) {
+        if (requiredGranted && action != null) {
             proceedWithChecks(action)
         } else {
             pendingAction = null
@@ -413,6 +477,9 @@ fun MainAppContent(
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     awaitingExternalModal = false
+                    if (DeviceBrowser.hasAllFilesAccess(context) && !hasMediaPermission) {
+                        viewModel.refreshMediaPermissionAndLoad(forceRefresh = true)
+                    }
                     if (missingSetting != null) {
                         recheckPendingSetting()
                     }
@@ -492,6 +559,46 @@ fun MainAppContent(
                     modifier = Modifier.testTag("cancel_setting_button")
                 ) {
                     Text("CANCEL", color = colors.onSurfaceVariant)
+                }
+            },
+            containerColor = colors.surfaceVariant
+        )
+    }
+
+    if (showStartupAllFilesDialog) {
+        val colors = MaterialTheme.colorScheme
+        AlertDialog(
+            onDismissRequest = { showStartupAllFilesDialog = false },
+            title = {
+                Text(
+                    text = "Allow All Files Access",
+                    color = colors.onSurface,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Max Share needs All Files permission to browse and share videos, music, APKs, and all file types from internal and external storage.",
+                    color = colors.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showStartupAllFilesDialog = false
+                        launchAllFilesPermissionAtStart()
+                    },
+                    modifier = Modifier.testTag("startup_all_files_allow_button")
+                ) {
+                    Text("ALLOW", color = colors.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showStartupAllFilesDialog = false },
+                    modifier = Modifier.testTag("startup_all_files_later_button")
+                ) {
+                    Text("LATER", color = colors.onSurfaceVariant)
                 }
             },
             containerColor = colors.surfaceVariant

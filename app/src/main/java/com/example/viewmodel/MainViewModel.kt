@@ -20,6 +20,7 @@ import com.example.model.FileItem
 import com.example.model.TransferDirection
 import com.example.model.TransferStats
 import com.example.model.TransferStatus
+import com.example.model.formatBytes
 import com.example.p2p.BluetoothDiscoveryHelper
 import com.example.p2p.WifiDirectManager
 import com.example.picker.DeviceMediaScanner
@@ -27,6 +28,7 @@ import com.example.picker.PickerAppItem
 import com.example.picker.PickerMediaItem
 import com.example.picker.PickerThumbnailCache
 import com.example.transfer.FileTransferEngine
+import com.example.transfer.TransferForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,6 +91,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var hasCompletedMediaScan = false
     private var hasCompletedFilesScan = false
     private var hasCompletedAppsScan = false
+    private var lastNotificationUpdateAt = 0L
 
     private val _pickerImages = MutableStateFlow<List<PickerMediaItem>>(emptyList())
     val pickerImages: StateFlow<List<PickerMediaItem>> = _pickerImages.asStateFlow()
@@ -659,6 +662,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else -> "Error"
     }
 
+    private fun formatServiceNotificationText(
+        files: List<FileItem>,
+        stats: TransferStats
+    ): String {
+        val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
+        val completedCount = files.count { it.status == TransferStatus.COMPLETED }
+        val totalCount = files.size
+        val activeFile = files.firstOrNull { it.status == TransferStatus.TRANSFERRING }
+        val speedPart = if (stats.speedBytesPerSec > 0L) "${formatBytes(stats.speedBytesPerSec)}/s • " else ""
+        return when {
+            activeFile != null && totalCount > 0 ->
+                "${activeFile.name} ($completedCount/$totalCount) • $speedPart$percent%"
+            totalCount > 0 ->
+                "$completedCount/$totalCount files • $speedPart$percent%"
+            else -> "Preparing transfer..."
+        }
+    }
+
+    private fun startTransferForegroundService(
+        direction: TransferDirection,
+        files: List<FileItem>,
+        stats: TransferStats
+    ) {
+        lastNotificationUpdateAt = System.currentTimeMillis()
+        val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
+        TransferForegroundService.start(
+            context = getApplication(),
+            direction = direction,
+            content = formatServiceNotificationText(files, stats),
+            progressPercent = percent
+        )
+    }
+
+    private fun updateTransferForegroundService(
+        direction: TransferDirection,
+        files: List<FileItem>,
+        stats: TransferStats
+    ) {
+        val now = System.currentTimeMillis()
+        if (now - lastNotificationUpdateAt < 450L) return
+        lastNotificationUpdateAt = now
+        val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
+        TransferForegroundService.update(
+            context = getApplication(),
+            direction = direction,
+            content = formatServiceNotificationText(files, stats),
+            progressPercent = percent
+        )
+    }
+
+    private fun stopTransferForegroundService() {
+        TransferForegroundService.stop(getApplication())
+    }
+
     private fun handleTransferComplete(
         success: Boolean,
         error: String?,
@@ -669,6 +726,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _isTransferActive.value = false
         _isTransferComplete.value = success
+        stopTransferForegroundService()
         if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
             _transferError.value = error
         }
@@ -679,6 +737,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isTransferActive.value = true
         _isTransferComplete.value = false
         _transferError.value = null
+        startTransferForegroundService(
+            direction = TransferDirection.SEND,
+            files = _selectedFiles.value,
+            stats = TransferStats(totalBytes = _selectedFiles.value.sumOf { it.sizeBytes })
+        )
 
         transferJob?.cancel()
         transferJob = viewModelScope.launch {
@@ -691,10 +754,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _transferFiles.value = initialFiles
                     _transferStats.value = initialStats
                     _currentScreen.value = AppScreen.TRANSFER
+                    updateTransferForegroundService(TransferDirection.SEND, initialFiles, initialStats)
                 },
                 onProgress = { updatedFiles, stats ->
                     _transferFiles.value = updatedFiles
                     _transferStats.value = stats
+                    updateTransferForegroundService(TransferDirection.SEND, updatedFiles, stats)
                 },
                 onComplete = { success, error ->
                     handleTransferComplete(success, error, clearConnecting = true)
@@ -710,6 +775,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _transferError.value = null
         _transferFiles.value = emptyList()
         _transferStats.value = TransferStats()
+        startTransferForegroundService(
+            direction = TransferDirection.RECEIVE,
+            files = emptyList(),
+            stats = TransferStats()
+        )
 
         transferEngine.stopTransfer()
         transferJob?.cancel()
@@ -721,10 +791,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _transferFiles.value = initialFiles
                     _transferStats.value = initialStats
                     _currentScreen.value = AppScreen.TRANSFER
+                    updateTransferForegroundService(TransferDirection.RECEIVE, initialFiles, initialStats)
                 },
                 onProgress = { updatedFiles, stats ->
                     _transferFiles.value = updatedFiles
                     _transferStats.value = stats
+                    updateTransferForegroundService(TransferDirection.RECEIVE, updatedFiles, stats)
                 },
                 onComplete = { success, error ->
                     handleTransferComplete(success, error, clearConnecting = false)
@@ -748,6 +820,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transferEngine.stopTransfer()
         transferJob?.cancel()
         _isTransferActive.value = false
+        stopTransferForegroundService()
         _transferFiles.update { list ->
             list.map {
                 if (it.status == TransferStatus.TRANSFERRING || it.status == TransferStatus.PENDING) {
@@ -766,9 +839,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppBackgrounded() {
         cacheBuildJob?.cancel()
+        PickerThumbnailCache.clearMemoryCache()
+        if (_isTransferActive.value) {
+            // Keep active transfer sockets, Wi-Fi Direct group, and foreground service alive in background
+            return
+        }
         resetToHome()
         wifiDirectManager.unregister()
-        PickerThumbnailCache.clearMemoryCache()
         TempFileCacheManager.closeSessionAsync(getApplication())
     }
 
@@ -792,6 +869,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         cacheBuildJob?.cancel()
         stopDiscoveryLoop()
         cancelAllTransfers()
+        stopTransferForegroundService()
         wifiDirectManager.unregister()
         PickerThumbnailCache.clearMemoryCache()
         TempFileCacheManager.closeSessionBlocking(getApplication())
