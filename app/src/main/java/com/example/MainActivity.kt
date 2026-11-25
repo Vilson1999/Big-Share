@@ -320,6 +320,7 @@ fun MainAppContent(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val receiveLocationUri by viewModel.receiveLocationUri.collectAsStateWithLifecycle()
     val receiveLocationLabel by viewModel.receiveLocationLabel.collectAsStateWithLifecycle()
+    val runInBackground by viewModel.runInBackground.collectAsStateWithLifecycle()
 
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var awaitingExternalModal by remember { mutableStateOf(false) }
@@ -631,6 +632,8 @@ fun MainAppContent(
                         themeMode = themeMode,
                         receiveLocationLabel = receiveLocationLabel,
                         hasCustomReceiveLocation = !receiveLocationUri.isNullOrBlank(),
+                        runInBackground = runInBackground,
+                        onRunInBackgroundChange = { enabled -> viewModel.updateRunInBackground(enabled) },
                         onThemeModeSelect = { mode -> viewModel.updateThemeMode(mode) },
                         onReceiveLocationSelected = { treeUri ->
                             viewModel.updateReceiveLocation(context, treeUri)

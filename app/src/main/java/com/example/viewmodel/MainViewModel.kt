@@ -88,6 +88,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var filesPreloadJob: Job? = null
     private var appsPreloadJob: Job? = null
     private var cacheBuildJob: Job? = null
+    private var backgroundExpiryJob: Job? = null
+    private var isAppInBackground = false
     private var hasCompletedMediaScan = false
     private var hasCompletedFilesScan = false
     private var hasCompletedAppsScan = false
@@ -153,9 +155,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val receiveLocationLabel: StateFlow<String> = _receiveLocationLabel.asStateFlow()
 
+    private val _runInBackground = MutableStateFlow(
+        prefs.getBoolean("run_in_background", true)
+    )
+    val runInBackground: StateFlow<Boolean> = _runInBackground.asStateFlow()
+
     fun openProfile() {
         _transferError.value = null
         _currentScreen.value = AppScreen.PROFILE
+    }
+
+    fun updateRunInBackground(enabled: Boolean) {
+        _runInBackground.value = enabled
+        prefs.edit().putBoolean("run_in_background", enabled).apply()
+        if (!enabled) {
+            backgroundExpiryJob?.cancel()
+            backgroundExpiryJob = null
+            stopTransferForegroundService()
+        }
     }
 
     fun updateThemeMode(mode: AppThemeMode) {
@@ -249,6 +266,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val DEFAULT_RECEIVE_LOCATION_LABEL = "Downloads/Max Share"
+        private const val BACKGROUND_DURATION_MS = 2 * 60 * 1000L
     }
 
     init {
@@ -685,6 +703,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         files: List<FileItem>,
         stats: TransferStats
     ) {
+        if (!_runInBackground.value) return
         lastNotificationUpdateAt = System.currentTimeMillis()
         val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
         TransferForegroundService.start(
@@ -700,8 +719,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         files: List<FileItem>,
         stats: TransferStats
     ) {
+        if (!_runInBackground.value) return
         val now = System.currentTimeMillis()
-        if (now - lastNotificationUpdateAt < 450L) return
+        if (now - lastNotificationUpdateAt < 1000L) return
         lastNotificationUpdateAt = now
         val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
         TransferForegroundService.update(
@@ -726,7 +746,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _isTransferActive.value = false
         _isTransferComplete.value = success
-        stopTransferForegroundService()
+        if (isAppInBackground && _runInBackground.value) {
+            TransferForegroundService.startKeepAlive(getApplication())
+        } else {
+            stopTransferForegroundService()
+        }
         if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
             _transferError.value = error
         }
@@ -820,7 +844,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transferEngine.stopTransfer()
         transferJob?.cancel()
         _isTransferActive.value = false
-        stopTransferForegroundService()
+        if (!isAppInBackground || !_runInBackground.value) {
+            stopTransferForegroundService()
+        }
         _transferFiles.update { list ->
             list.map {
                 if (it.status == TransferStatus.TRANSFERRING || it.status == TransferStatus.PENDING) {
@@ -831,6 +857,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppForegrounded() {
+        isAppInBackground = false
+        backgroundExpiryJob?.cancel()
+        backgroundExpiryJob = null
+        if (!_isTransferActive.value) {
+            stopTransferForegroundService()
+        }
         TempFileCacheManager.openSession(getApplication(), cleanStale = false)
         wifiDirectManager.ensureRegistered()
         ensurePickerFilesLoaded()
@@ -838,15 +870,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppBackgrounded() {
+        isAppInBackground = true
         cacheBuildJob?.cancel()
         PickerThumbnailCache.clearMemoryCache()
-        if (_isTransferActive.value) {
-            // Keep active transfer sockets, Wi-Fi Direct group, and foreground service alive in background
+        if (!_runInBackground.value) {
+            backgroundExpiryJob?.cancel()
+            backgroundExpiryJob = null
+            stopTransferForegroundService()
+            resetToHome()
+            wifiDirectManager.unregister()
+            TempFileCacheManager.closeSessionAsync(getApplication())
             return
         }
-        resetToHome()
-        wifiDirectManager.unregister()
-        TempFileCacheManager.closeSessionAsync(getApplication())
+
+        if (_isTransferActive.value) {
+            updateTransferForegroundService(_transferDirection.value, _transferFiles.value, _transferStats.value)
+        } else {
+            TransferForegroundService.startKeepAlive(getApplication())
+        }
+
+        backgroundExpiryJob?.cancel()
+        backgroundExpiryJob = viewModelScope.launch {
+            delay(BACKGROUND_DURATION_MS)
+            if (isAppInBackground) {
+                stopTransferForegroundService()
+                resetToHome()
+                wifiDirectManager.unregister()
+                TempFileCacheManager.closeSessionAsync(getApplication())
+            }
+        }
     }
 
     fun resetToHome() {
@@ -866,6 +918,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        backgroundExpiryJob?.cancel()
         cacheBuildJob?.cancel()
         stopDiscoveryLoop()
         cancelAllTransfers()

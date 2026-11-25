@@ -32,38 +32,36 @@ class TransferForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                releaseLocks()
                 stopForegroundCompat()
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_KEEPALIVE -> {
+                // Ultra-lite background session mode: release heavy wake/wifi locks
+                releaseLocks()
+                postNotification(
+                    title = "Max Share",
+                    content = "Running in background",
+                    progress = 0,
+                    showProgress = false,
+                    isReceiving = false
+                )
+            }
             ACTION_START, ACTION_UPDATE, null -> {
-                val title = intent?.getStringExtra(EXTRA_TITLE) ?: "File Transfer Active"
-                val content = intent?.getStringExtra(EXTRA_CONTENT) ?: "Transferring files in background"
+                val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Max Share"
+                val content = intent?.getStringExtra(EXTRA_CONTENT) ?: "Transferring files"
                 val progress = intent?.getIntExtra(EXTRA_PROGRESS, 0)?.coerceIn(0, 100) ?: 0
                 val isReceiving = intent?.getBooleanExtra(EXTRA_IS_RECEIVING, false) ?: false
 
                 acquireLocks()
-                val notification = buildNotification(
+                postNotification(
                     title = title,
                     content = content,
                     progress = progress,
+                    showProgress = true,
                     isReceiving = isReceiving
                 )
-                if (!isForegroundStarted) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        startForeground(
-                            NOTIFICATION_ID,
-                            notification,
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                        )
-                    } else {
-                        startForeground(NOTIFICATION_ID, notification)
-                    }
-                    isForegroundStarted = true
-                } else {
-                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                    nm?.notify(NOTIFICATION_ID, notification)
-                }
             }
         }
         return START_NOT_STICKY
@@ -73,6 +71,37 @@ class TransferForegroundService : Service() {
         releaseLocks()
         stopForegroundCompat()
         super.onDestroy()
+    }
+
+    private fun postNotification(
+        title: String,
+        content: String,
+        progress: Int,
+        showProgress: Boolean,
+        isReceiving: Boolean
+    ) {
+        val notification = buildNotification(
+            title = title,
+            content = content,
+            progress = progress,
+            showProgress = showProgress,
+            isReceiving = isReceiving
+        )
+        if (!isForegroundStarted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            isForegroundStarted = true
+        } else {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun stopForegroundCompat() {
@@ -87,12 +116,14 @@ class TransferForegroundService : Service() {
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "File Transfers",
-                NotificationManager.IMPORTANCE_LOW
+                "Background Activity",
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Keeps active P2P file transfers running in the background"
+                description = "Lightweight service while transfers or 2-minute background mode run"
                 setShowBadge(false)
                 setSound(null, null)
+                enableLights(false)
+                enableVibration(false)
             }
             nm.createNotificationChannel(channel)
         }
@@ -102,6 +133,7 @@ class TransferForegroundService : Service() {
         title: String,
         content: String,
         progress: Int,
+        showProgress: Boolean,
         isReceiving: Boolean
     ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
@@ -114,21 +146,24 @@ class TransferForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val smallIcon = if (isReceiving) {
-            android.R.drawable.stat_sys_download
+        val smallIcon = if (showProgress) {
+            if (isReceiving) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload
         } else {
-            android.R.drawable.stat_sys_upload
+            android.R.drawable.stat_notify_sync_noanim
         }
 
-        return Notification.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setContentTitle(title)
             .setContentText(content)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setProgress(100, progress, progress <= 0)
             .setContentIntent(pendingIntent)
-            .build()
+
+        if (showProgress) {
+            builder.setProgress(100, progress, progress <= 0)
+        }
+        return builder.build()
     }
 
     private fun acquireLocks() {
@@ -143,7 +178,7 @@ class TransferForegroundService : Service() {
                 }
             }
             if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire(2 * 60 * 60 * 1000L)
+                wakeLock?.acquire(BACKGROUND_LOCK_TIMEOUT_MS)
             }
         } catch (_: Exception) {}
 
@@ -183,10 +218,12 @@ class TransferForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "max_share_transfer"
+        private const val CHANNEL_ID = "max_share_lite_bg"
         private const val NOTIFICATION_ID = 4101
+        private const val BACKGROUND_LOCK_TIMEOUT_MS = 2 * 60 * 1000L
         private const val ACTION_START = "com.example.transfer.action.START"
         private const val ACTION_UPDATE = "com.example.transfer.action.UPDATE"
+        private const val ACTION_KEEPALIVE = "com.example.transfer.action.KEEPALIVE"
         private const val ACTION_STOP = "com.example.transfer.action.STOP"
         private const val EXTRA_TITLE = "extra_title"
         private const val EXTRA_CONTENT = "extra_content"
@@ -228,6 +265,15 @@ class TransferForegroundService : Service() {
             }
             try {
                 context.startService(intent)
+            } catch (_: Exception) {}
+        }
+
+        fun startKeepAlive(context: Context) {
+            val intent = Intent(context, TransferForegroundService::class.java).apply {
+                action = ACTION_KEEPALIVE
+            }
+            try {
+                ContextCompat.startForegroundService(context, intent)
             } catch (_: Exception) {}
         }
 
