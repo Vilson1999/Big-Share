@@ -17,7 +17,7 @@
 
 ### Send
 
-Choose files on your device, discover nearby peers, and send selected files directly to another connected device. The picker supports images, videos, music, installed apps, APK files, and browsing device storage.
+Choose files on your device, discover nearby peers, and send selected files directly to another connected device. The picker supports images, videos, music, installed apps, APK files, and browsing local storage.
 
 ### Receive
 
@@ -39,14 +39,20 @@ Bluetooth discovery helpers assist nearby-device discovery alongside Android Wi-
 
 Set a display name and avatar for nearby-device identification. Files can also be shared to Max Share from Android's system share menu.
 
+## Screenshots
+
+| | | | |
+|:---:|:---:|:---:|:---:|
+| <img src="https://raw.githubusercontent.com/Vilson1999/Max-Share/main/screenshot-1.png" alt="Screenshot 1" width="220" /> | <img src="https://raw.githubusercontent.com/Vilson1999/Max-Share/main/screenshot-2.png" alt="Screenshot 2" width="220" /> | <img src="https://raw.githubusercontent.com/Vilson1999/Max-Share/main/screenshot-3.png" alt="Screenshot 3" width="220" /> | <img src="https://raw.githubusercontent.com/Vilson1999/Max-Share/main/screenshot-4.png" alt="Screenshot 4" width="220" /> |
+
 ## Releases and Updates
 
-The latest published release is **v1.0.9**. The project publishes separate APK downloads for ARMv7 and ARMv8 devices. Open the [latest release](https://github.com/Vilson1999/Big-Share/releases/latest) for APK downloads and release notes.
+The latest published release is **v1.0.9**. The project publishes separate APK downloads for ARMv7 and ARMv8 devices. Open the [latest release](https://github.com/Vilson1999/Big-Share/releases/latest) to download the APK that matches your device architecture.
 
 - [ARMv7 (`armeabi-v7a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MaxShare-armv7-armeabi-v7a.apk)
 - [ARMv8 (`arm64-v8a`) APK](https://github.com/Vilson1999/Big-Share/releases/latest/download/MaxShare-armv8-arm64-v8a.apk)
 
-GitHub Actions builds and publishes APKs when code is pushed to the configured branches or a version tag is pushed. For builds without a version tag, the release tag is generated automatically from the app version and build configuration.
+GitHub Actions builds and publishes APKs when code is pushed to the configured branches or a version tag is pushed. For builds without a version tag, the release tag is generated automatically from the build run.
 
 ## Technology
 
