@@ -88,7 +88,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var filesPreloadJob: Job? = null
     private var appsPreloadJob: Job? = null
     private var cacheBuildJob: Job? = null
-    private var backgroundExpiryJob: Job? = null
     private var isAppInBackground = false
     private var hasCompletedMediaScan = false
     private var hasCompletedFilesScan = false
@@ -155,24 +154,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val receiveLocationLabel: StateFlow<String> = _receiveLocationLabel.asStateFlow()
 
-    private val _runInBackground = MutableStateFlow(
-        prefs.getBoolean("run_in_background", true)
-    )
-    val runInBackground: StateFlow<Boolean> = _runInBackground.asStateFlow()
-
     fun openProfile() {
         _transferError.value = null
         _currentScreen.value = AppScreen.PROFILE
-    }
-
-    fun updateRunInBackground(enabled: Boolean) {
-        _runInBackground.value = enabled
-        prefs.edit().putBoolean("run_in_background", enabled).apply()
-        if (!enabled) {
-            backgroundExpiryJob?.cancel()
-            backgroundExpiryJob = null
-            stopTransferForegroundService()
-        }
     }
 
     fun updateThemeMode(mode: AppThemeMode) {
@@ -266,12 +250,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val DEFAULT_RECEIVE_LOCATION_LABEL = "Downloads/Max Share"
-        private const val BACKGROUND_DURATION_MS = 2 * 60 * 1000L
     }
 
     init {
         TempFileCacheManager.openSession(application, cleanStale = true)
         preloadDeviceFilesOnStartup()
+        var wasServiceRunning = false
+        viewModelScope.launch {
+            TransferForegroundService.isRunning.collect { running ->
+                if (wasServiceRunning && !running) {
+                    if (_isTransferActive.value) {
+                        cancelAllTransfers()
+                    }
+                    if (isAppInBackground) {
+                        stopBackgroundActivity()
+                    }
+                }
+                wasServiceRunning = running
+            }
+        }
         viewModelScope.launch {
             wifiDirectManager.connectionInfo.collect { info ->
                 if (info != null && info.groupFormed) {
@@ -703,7 +700,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         files: List<FileItem>,
         stats: TransferStats
     ) {
-        if (!_runInBackground.value) return
         lastNotificationUpdateAt = System.currentTimeMillis()
         val percent = (stats.overallProgress * 100f).toInt().coerceIn(0, 100)
         TransferForegroundService.start(
@@ -719,7 +715,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         files: List<FileItem>,
         stats: TransferStats
     ) {
-        if (!_runInBackground.value) return
         val now = System.currentTimeMillis()
         if (now - lastNotificationUpdateAt < 1000L) return
         lastNotificationUpdateAt = now
@@ -746,10 +741,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _isTransferActive.value = false
         _isTransferComplete.value = success
-        if (isAppInBackground && _runInBackground.value) {
-            TransferForegroundService.startKeepAlive(getApplication())
-        } else {
-            stopTransferForegroundService()
+        stopTransferForegroundService()
+        if (isAppInBackground) {
+            stopBackgroundActivity()
         }
         if (!success && error != null && !error.contains("closed", ignoreCase = true)) {
             _transferError.value = error
@@ -844,8 +838,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         transferEngine.stopTransfer()
         transferJob?.cancel()
         _isTransferActive.value = false
-        if (!isAppInBackground || !_runInBackground.value) {
-            stopTransferForegroundService()
+        stopTransferForegroundService()
+        if (isAppInBackground) {
+            stopBackgroundActivity()
         }
         _transferFiles.update { list ->
             list.map {
@@ -858,8 +853,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForegrounded() {
         isAppInBackground = false
-        backgroundExpiryJob?.cancel()
-        backgroundExpiryJob = null
         if (!_isTransferActive.value) {
             stopTransferForegroundService()
         }
@@ -873,32 +866,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isAppInBackground = true
         cacheBuildJob?.cancel()
         PickerThumbnailCache.clearMemoryCache()
-        if (!_runInBackground.value) {
-            backgroundExpiryJob?.cancel()
-            backgroundExpiryJob = null
-            stopTransferForegroundService()
-            resetToHome()
-            wifiDirectManager.unregister()
-            TempFileCacheManager.closeSessionAsync(getApplication())
+        if (_isTransferActive.value || TransferForegroundService.isRunning.value) {
+            // Keep running in background only while the foreground transfer service is running
+            updateTransferForegroundService(_transferDirection.value, _transferFiles.value, _transferStats.value)
             return
         }
 
-        if (_isTransferActive.value) {
-            updateTransferForegroundService(_transferDirection.value, _transferFiles.value, _transferStats.value)
-        } else {
-            TransferForegroundService.startKeepAlive(getApplication())
-        }
+        // Foreground service is not running: close background work immediately
+        stopTransferForegroundService()
+        resetToHome()
+        wifiDirectManager.unregister()
+        TempFileCacheManager.closeSessionAsync(getApplication())
+    }
 
-        backgroundExpiryJob?.cancel()
-        backgroundExpiryJob = viewModelScope.launch {
-            delay(BACKGROUND_DURATION_MS)
-            if (isAppInBackground) {
-                stopTransferForegroundService()
-                resetToHome()
-                wifiDirectManager.unregister()
-                TempFileCacheManager.closeSessionAsync(getApplication())
-            }
-        }
+    private fun stopBackgroundActivity() {
+        connectTimeoutJob?.cancel()
+        stopDiscoveryLoop()
+        wifiDirectManager.stopDiscovery()
+        wifiDirectManager.disconnect()
+        wifiDirectManager.unregister()
+        TempFileCacheManager.closeSessionAsync(getApplication())
     }
 
     fun resetToHome() {
@@ -918,7 +905,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        backgroundExpiryJob?.cancel()
         cacheBuildJob?.cancel()
         stopDiscoveryLoop()
         cancelAllTransfers()

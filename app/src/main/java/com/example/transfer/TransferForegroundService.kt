@@ -15,6 +15,9 @@ import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.model.TransferDirection
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class TransferForegroundService : Service() {
 
@@ -32,21 +35,8 @@ class TransferForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                releaseLocks()
-                stopForegroundCompat()
-                stopSelf()
+                closeService()
                 return START_NOT_STICKY
-            }
-            ACTION_KEEPALIVE -> {
-                // Ultra-lite background session mode: release heavy wake/wifi locks
-                releaseLocks()
-                postNotification(
-                    title = "Max Share",
-                    content = "Running in background",
-                    progress = 0,
-                    showProgress = false,
-                    isReceiving = false
-                )
             }
             ACTION_START, ACTION_UPDATE, null -> {
                 val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Max Share"
@@ -59,7 +49,6 @@ class TransferForegroundService : Service() {
                     title = title,
                     content = content,
                     progress = progress,
-                    showProgress = true,
                     isReceiving = isReceiving
                 )
             }
@@ -70,21 +59,27 @@ class TransferForegroundService : Service() {
     override fun onDestroy() {
         releaseLocks()
         stopForegroundCompat()
+        _isRunning.value = false
         super.onDestroy()
+    }
+
+    private fun closeService() {
+        releaseLocks()
+        stopForegroundCompat()
+        _isRunning.value = false
+        stopSelf()
     }
 
     private fun postNotification(
         title: String,
         content: String,
         progress: Int,
-        showProgress: Boolean,
         isReceiving: Boolean
     ) {
         val notification = buildNotification(
             title = title,
             content = content,
             progress = progress,
-            showProgress = showProgress,
             isReceiving = isReceiving
         )
         if (!isForegroundStarted) {
@@ -98,6 +93,7 @@ class TransferForegroundService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
             isForegroundStarted = true
+            _isRunning.value = true
         } else {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             nm?.notify(NOTIFICATION_ID, notification)
@@ -116,10 +112,10 @@ class TransferForegroundService : Service() {
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Background Activity",
+                "File Transfers",
                 NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Lightweight service while transfers or 2-minute background mode run"
+                description = "Shows progress while sending or receiving files in background"
                 setShowBadge(false)
                 setSound(null, null)
                 enableLights(false)
@@ -133,7 +129,6 @@ class TransferForegroundService : Service() {
         title: String,
         content: String,
         progress: Int,
-        showProgress: Boolean,
         isReceiving: Boolean
     ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
@@ -146,24 +141,21 @@ class TransferForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val smallIcon = if (showProgress) {
-            if (isReceiving) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload
+        val smallIcon = if (isReceiving) {
+            android.R.drawable.stat_sys_download
         } else {
-            android.R.drawable.stat_notify_sync_noanim
+            android.R.drawable.stat_sys_upload
         }
 
-        val builder = Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(smallIcon)
             .setContentTitle(title)
             .setContentText(content)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setProgress(100, progress, progress <= 0)
             .setContentIntent(pendingIntent)
-
-        if (showProgress) {
-            builder.setProgress(100, progress, progress <= 0)
-        }
-        return builder.build()
+            .build()
     }
 
     private fun acquireLocks() {
@@ -178,7 +170,7 @@ class TransferForegroundService : Service() {
                 }
             }
             if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire(BACKGROUND_LOCK_TIMEOUT_MS)
+                wakeLock?.acquire()
             }
         } catch (_: Exception) {}
 
@@ -218,17 +210,18 @@ class TransferForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "max_share_lite_bg"
+        private const val CHANNEL_ID = "max_share_transfer_fg"
         private const val NOTIFICATION_ID = 4101
-        private const val BACKGROUND_LOCK_TIMEOUT_MS = 2 * 60 * 1000L
         private const val ACTION_START = "com.example.transfer.action.START"
         private const val ACTION_UPDATE = "com.example.transfer.action.UPDATE"
-        private const val ACTION_KEEPALIVE = "com.example.transfer.action.KEEPALIVE"
         private const val ACTION_STOP = "com.example.transfer.action.STOP"
         private const val EXTRA_TITLE = "extra_title"
         private const val EXTRA_CONTENT = "extra_content"
         private const val EXTRA_PROGRESS = "extra_progress"
         private const val EXTRA_IS_RECEIVING = "extra_is_receiving"
+
+        private val _isRunning = MutableStateFlow(false)
+        val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
         fun start(
             context: Context,
@@ -255,6 +248,7 @@ class TransferForegroundService : Service() {
             content: String,
             progressPercent: Int
         ) {
+            if (!_isRunning.value) return
             val isReceiving = direction == TransferDirection.RECEIVE
             val intent = Intent(context, TransferForegroundService::class.java).apply {
                 action = ACTION_UPDATE
@@ -268,16 +262,8 @@ class TransferForegroundService : Service() {
             } catch (_: Exception) {}
         }
 
-        fun startKeepAlive(context: Context) {
-            val intent = Intent(context, TransferForegroundService::class.java).apply {
-                action = ACTION_KEEPALIVE
-            }
-            try {
-                ContextCompat.startForegroundService(context, intent)
-            } catch (_: Exception) {}
-        }
-
         fun stop(context: Context) {
+            _isRunning.value = false
             try {
                 context.stopService(Intent(context, TransferForegroundService::class.java))
             } catch (_: Exception) {}

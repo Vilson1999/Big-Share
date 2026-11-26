@@ -36,8 +36,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -80,8 +78,6 @@ fun ProfileScreen(
     themeMode: AppThemeMode = AppThemeMode.DEFAULT,
     receiveLocationLabel: String = "Downloads/Max Share",
     hasCustomReceiveLocation: Boolean = false,
-    runInBackground: Boolean = true,
-    onRunInBackgroundChange: (Boolean) -> Unit = {},
     onThemeModeSelect: (AppThemeMode) -> Unit = {},
     onReceiveLocationSelected: (Uri?) -> Unit = {},
     onExternalModalLaunch: () -> Unit = {},
@@ -311,72 +307,6 @@ fun ProfileScreen(
                         modifier = Modifier.padding(start = 4.dp)
                     )
 
-                    // Run in Background Toggle (outside folders; hidden on first launch)
-                    if (!isFirstLaunch) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(colors.surfaceVariant)
-                                .border(1.dp, colors.outline, RoundedCornerShape(16.dp))
-                                .heightIn(min = 64.dp)
-                                .clickable { onRunInBackgroundChange(!runInBackground) }
-                                .padding(horizontal = 14.dp, vertical = 12.dp)
-                                .testTag("run_in_background_card"),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colors.primary.copy(alpha = 0.14f))
-                                    .border(1.dp, colors.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = AppIcons.Settings,
-                                    contentDescription = "Run in background",
-                                    tint = colors.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 12.dp)
-                            ) {
-                                Text(
-                                    text = "Run in background",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.onSurface
-                                )
-                                Text(
-                                    text = if (runInBackground) {
-                                        "Runs up to 2 min after minimizing"
-                                    } else {
-                                        "Stops immediately when minimized"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colors.onSurfaceVariant
-                                )
-                            }
-
-                            Switch(
-                                checked = runInBackground,
-                                onCheckedChange = onRunInBackgroundChange,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = colors.onPrimary,
-                                    checkedTrackColor = colors.primary
-                                ),
-                                modifier = Modifier.testTag("run_in_background_switch")
-                            )
-                        }
-                    }
-
                     // Folder 1: Theme
                     SettingFolderCard(
                         title = "Theme",
@@ -574,16 +504,42 @@ fun ProfileScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(
                                     Brush.linearGradient(
-                                        listOf(Color(0xFF0B1120), Color(0xFF0F172A))
+                                        listOf(
+                                            Color(0xFF1D4ED8),
+                                            Color(0xFF4338CA),
+                                            Color(0xFF7C3AED)
+                                        )
                                     )
                                 )
-                                .border(1.dp, colors.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.linearGradient(
+                                        listOf(
+                                            Color.White.copy(alpha = 0.72f),
+                                            Color(0xFFBAE6FD).copy(alpha = 0.35f)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(14.dp)
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                Color.White.copy(alpha = 0.32f),
+                                                Color.White.copy(alpha = 0.06f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    )
+                            )
                             Image(
                                 painter = painterResource(id = R.drawable.ic_launcher_art),
                                 contentDescription = stringResource(R.string.app_name),
