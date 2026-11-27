@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+            val useMaterialUi by viewModel.useMaterialUi.collectAsStateWithLifecycle()
+            val useMaterialIcons by viewModel.useMaterialIcons.collectAsStateWithLifecycle()
             val systemDark = isSystemInDarkTheme()
             val darkTheme = when (themeMode) {
                 AppThemeMode.DEFAULT -> systemDark
@@ -118,7 +120,11 @@ class MainActivity : ComponentActivity() {
                 onDispose {}
             }
 
-            AppTheme(darkTheme = darkTheme) {
+            AppTheme(
+                darkTheme = darkTheme,
+                useMaterialUi = useMaterialUi,
+                useMaterialIcons = useMaterialIcons
+            ) {
                 MainAppContent(
                     viewModel = viewModel,
                     incomingSharedUris = pendingSharedUris,
@@ -320,6 +326,9 @@ fun MainAppContent(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val receiveLocationUri by viewModel.receiveLocationUri.collectAsStateWithLifecycle()
     val receiveLocationLabel by viewModel.receiveLocationLabel.collectAsStateWithLifecycle()
+    val showHiddenFolders by viewModel.showHiddenFolders.collectAsStateWithLifecycle()
+    val useMaterialUi by viewModel.useMaterialUi.collectAsStateWithLifecycle()
+    val useMaterialIcons by viewModel.useMaterialIcons.collectAsStateWithLifecycle()
 
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var awaitingExternalModal by remember { mutableStateOf(false) }
@@ -631,6 +640,12 @@ fun MainAppContent(
                         themeMode = themeMode,
                         receiveLocationLabel = receiveLocationLabel,
                         hasCustomReceiveLocation = !receiveLocationUri.isNullOrBlank(),
+                        showHiddenFolders = showHiddenFolders,
+                        useMaterialUi = useMaterialUi,
+                        useMaterialIcons = useMaterialIcons,
+                        onShowHiddenFoldersChange = { viewModel.updateShowHiddenFolders(it) },
+                        onUseMaterialUiChange = { viewModel.updateUseMaterialUi(it) },
+                        onUseMaterialIconsChange = { viewModel.updateUseMaterialIcons(it) },
                         onThemeModeSelect = { mode -> viewModel.updateThemeMode(mode) },
                         onReceiveLocationSelected = { treeUri ->
                             viewModel.updateReceiveLocation(context, treeUri)
@@ -695,6 +710,7 @@ fun MainAppContent(
                         isScanningMedia = isScanningMedia,
                         isScanningApps = isScanningApps,
                         hasMediaPermission = hasMediaPermission,
+                        showHiddenFolders = showHiddenFolders,
                         onEnsureLoaded = { viewModel.ensurePickerFilesLoaded() },
                         onMediaPermissionResult = { viewModel.refreshMediaPermissionAndLoad(forceRefresh = true) },
                         onBackClick = { viewModel.resetToHome() },

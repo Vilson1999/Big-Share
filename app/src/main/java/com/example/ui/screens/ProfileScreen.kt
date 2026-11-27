@@ -31,11 +31,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,6 +72,7 @@ import com.example.ui.components.AppIcons
 import com.example.ui.components.AppTopBar
 import com.example.ui.components.UserAvatarCatalog
 import com.example.ui.components.atmosphericGlow
+import com.example.ui.theme.LocalUseMaterialDesignUi
 
 @Composable
 fun ProfileScreen(
@@ -78,6 +82,12 @@ fun ProfileScreen(
     themeMode: AppThemeMode = AppThemeMode.DEFAULT,
     receiveLocationLabel: String = "Downloads/Max Share",
     hasCustomReceiveLocation: Boolean = false,
+    showHiddenFolders: Boolean = false,
+    useMaterialUi: Boolean = true,
+    useMaterialIcons: Boolean = true,
+    onShowHiddenFoldersChange: (Boolean) -> Unit = {},
+    onUseMaterialUiChange: (Boolean) -> Unit = {},
+    onUseMaterialIconsChange: (Boolean) -> Unit = {},
     onThemeModeSelect: (AppThemeMode) -> Unit = {},
     onReceiveLocationSelected: (Uri?) -> Unit = {},
     onExternalModalLaunch: () -> Unit = {},
@@ -86,11 +96,13 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
+    val isMaterialUi = LocalUseMaterialDesignUi.current
     var nameInput by remember(initialName) { mutableStateOf(initialName) }
     var selectedAvatarIndex by remember(initialAvatarIndex) { mutableIntStateOf(initialAvatarIndex) }
 
+    var materialFolderExpanded by remember { mutableStateOf(true) }
     var themeFolderExpanded by remember { mutableStateOf(false) }
-    var storageFolderExpanded by remember { mutableStateOf(false) }
+    var storageFolderExpanded by remember { mutableStateOf(true) }
 
     val appVersionLabel = remember(context) {
         try {
@@ -154,7 +166,7 @@ fun ProfileScreen(
                     modifier = Modifier
                         .size(110.dp)
                         .shadow(
-                            elevation = 18.dp,
+                            elevation = if (isMaterialUi) 10.dp else 18.dp,
                             shape = CircleShape,
                             ambientColor = colors.primary.copy(alpha = 0.35f),
                             spotColor = colors.primary.copy(alpha = 0.45f)
@@ -202,7 +214,7 @@ fun ProfileScreen(
                             focusedContainerColor = colors.surfaceVariant,
                             unfocusedContainerColor = colors.surfaceVariant,
                             focusedBorderColor = colors.primary,
-                            unfocusedBorderColor = colors.outline,
+                            unfocusedBorderColor = colors.outline.copy(alpha = if (isMaterialUi) 0.5f else 1f),
                             cursorColor = colors.primary
                         ),
                         modifier = Modifier
@@ -254,7 +266,7 @@ fun ProfileScreen(
                                         .clip(CircleShape)
                                         .border(
                                             width = if (isSelected) 3.dp else 1.5.dp,
-                                            color = if (isSelected) colors.primary else colors.outline,
+                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = if (isMaterialUi) 0.5f else 1f),
                                             shape = CircleShape
                                         )
                                         .clickable { selectedAvatarIndex = option.index }
@@ -295,7 +307,7 @@ fun ProfileScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Settings
+                // Settings Folders
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -307,7 +319,47 @@ fun ProfileScreen(
                         modifier = Modifier.padding(start = 4.dp)
                     )
 
-                    // Folder 1: Theme
+                    // Folder 1: Material Design (UI + Icon ON/OFF toggles; hidden on first launch)
+                    if (!isFirstLaunch) {
+                        SettingFolderCard(
+                            title = "Material Design",
+                            summary = "UI: ${if (useMaterialUi) "On" else "Off"} • Icon: ${if (useMaterialIcons) "On" else "Off"}",
+                            icon = AppIcons.Style,
+                            expanded = materialFolderExpanded,
+                            folderTag = "setting_folder_material",
+                            onToggle = { materialFolderExpanded = !materialFolderExpanded }
+                        ) {
+                            SettingToggleRow(
+                                title = "Material Design UI",
+                                subtitle = if (useMaterialUi) {
+                                    "Dynamic Material 3 colors & surfaces"
+                                } else {
+                                    "Classic theme styling"
+                                },
+                                icon = AppIcons.Style,
+                                checked = useMaterialUi,
+                                switchTag = "material_design_ui_switch",
+                                onCheckedChange = onUseMaterialUiChange
+                            )
+
+                            HorizontalDivider(color = colors.outline.copy(alpha = 0.3f))
+
+                            SettingToggleRow(
+                                title = "Material Design Icon",
+                                subtitle = if (useMaterialIcons) {
+                                    "Material rounded iconography enabled"
+                                } else {
+                                    "Classic iconography enabled"
+                                },
+                                icon = AppIcons.Widgets,
+                                checked = useMaterialIcons,
+                                switchTag = "material_design_icon_switch",
+                                onCheckedChange = onUseMaterialIconsChange
+                            )
+                        }
+                    }
+
+                    // Folder 2: Theme
                     SettingFolderCard(
                         title = "Theme",
                         summary = themeMode.label,
@@ -321,7 +373,7 @@ fun ProfileScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(colors.surface)
-                                .border(1.dp, colors.outline.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                                .border(1.dp, colors.outline.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
                                 .padding(5.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -337,7 +389,7 @@ fun ProfileScreen(
                                         )
                                         .border(
                                             width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.35f),
+                                            color = if (isSelected) colors.primary else colors.outline.copy(alpha = 0.3f),
                                             shape = RoundedCornerShape(10.dp)
                                         )
                                         .clickable(
@@ -382,16 +434,31 @@ fun ProfileScreen(
                         }
                     }
 
-                    // Folder 2: Storage Location (hidden on first launch)
+                    // Folder 3: Storage & Files (Show hidden folder + Storage Location; hidden on first launch)
                     if (!isFirstLaunch) {
                         SettingFolderCard(
-                            title = "Storage Location",
-                            summary = receiveLocationLabel,
+                            title = "Storage & Files",
+                            summary = "${if (showHiddenFolders) "Hidden folder: On" else "Hidden folder: Off"} • $receiveLocationLabel",
                             icon = AppIcons.FolderOpen,
                             expanded = storageFolderExpanded,
                             folderTag = "setting_folder_storage",
                             onToggle = { storageFolderExpanded = !storageFolderExpanded }
                         ) {
+                            SettingToggleRow(
+                                title = "Show hidden folder",
+                                subtitle = if (showHiddenFolders) {
+                                    "Showing hidden folders & files"
+                                } else {
+                                    "Hidden folders & files are hidden"
+                                },
+                                icon = AppIcons.Visibility,
+                                checked = showHiddenFolders,
+                                switchTag = "show_hidden_folder_switch",
+                                onCheckedChange = onShowHiddenFoldersChange
+                            )
+
+                            HorizontalDivider(color = colors.outline.copy(alpha = 0.3f))
+
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(
                                     text = "Received files save to",
@@ -467,7 +534,7 @@ fun ProfileScreen(
                         onSaveProfile(finalName, selectedAvatarIndex)
                     },
                     enabled = nameInput.trim().isNotEmpty(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(if (isMaterialUi) 20.dp else 16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = colors.primary,
                         contentColor = colors.onPrimary,
@@ -494,9 +561,15 @@ fun ProfileScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.surfaceVariant.copy(alpha = 0.72f))
-                            .border(1.dp, colors.outline.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(if (isMaterialUi) 20.dp else 16.dp))
+                            .background(colors.surfaceVariant.copy(alpha = 0.85f))
+                            .then(
+                                if (isMaterialUi) {
+                                    Modifier
+                                } else {
+                                    Modifier.border(1.dp, colors.outline.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                                }
+                            )
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                             .testTag("me_app_info_footer"),
                         verticalAlignment = Alignment.CenterVertically,
@@ -582,6 +655,63 @@ fun ProfileScreen(
 }
 
 @Composable
+private fun SettingToggleRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    switchTag: String,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = colors.primary,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 10.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = colors.onPrimary,
+                checkedTrackColor = colors.primary
+            ),
+            modifier = Modifier.testTag(switchTag)
+        )
+    }
+}
+
+@Composable
 private fun SettingFolderCard(
     title: String,
     summary: String,
@@ -592,12 +722,20 @@ private fun SettingFolderCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val isMaterialUi = LocalUseMaterialDesignUi.current
+    val shape = RoundedCornerShape(if (isMaterialUi) 20.dp else 16.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(shape)
             .background(colors.surfaceVariant)
-            .border(1.dp, colors.outline, RoundedCornerShape(16.dp))
+            .then(
+                if (isMaterialUi) {
+                    Modifier.border(1.dp, colors.outline.copy(alpha = 0.28f), shape)
+                } else {
+                    Modifier.border(1.dp, colors.outline, shape)
+                }
+            )
     ) {
         Row(
             modifier = Modifier
@@ -612,14 +750,20 @@ private fun SettingFolderCard(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(colors.primary.copy(alpha = 0.14f))
-                    .border(1.dp, colors.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                    .background(if (isMaterialUi) colors.primaryContainer else colors.primary.copy(alpha = 0.14f))
+                    .then(
+                        if (isMaterialUi) {
+                            Modifier
+                        } else {
+                            Modifier.border(1.dp, colors.primary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = title,
-                    tint = colors.primary,
+                    tint = if (isMaterialUi) colors.onPrimaryContainer else colors.primary,
                     modifier = Modifier.size(20.dp)
                 )
             }

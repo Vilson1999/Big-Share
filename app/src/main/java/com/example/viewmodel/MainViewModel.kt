@@ -154,6 +154,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val receiveLocationLabel: StateFlow<String> = _receiveLocationLabel.asStateFlow()
 
+    private val _showHiddenFolders = MutableStateFlow(
+        prefs.getBoolean("show_hidden_folders", false)
+    )
+    val showHiddenFolders: StateFlow<Boolean> = _showHiddenFolders.asStateFlow()
+
+    private val _useMaterialUi = MutableStateFlow(
+        prefs.getBoolean("use_material_ui", true)
+    )
+    val useMaterialUi: StateFlow<Boolean> = _useMaterialUi.asStateFlow()
+
+    private val _useMaterialIcons = MutableStateFlow(
+        prefs.getBoolean("use_material_icons", true)
+    )
+    val useMaterialIcons: StateFlow<Boolean> = _useMaterialIcons.asStateFlow()
+
     fun openProfile() {
         _transferError.value = null
         _currentScreen.value = AppScreen.PROFILE
@@ -162,6 +177,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateThemeMode(mode: AppThemeMode) {
         _themeMode.value = mode
         prefs.edit().putString("app_theme_mode", mode.key).apply()
+    }
+
+    fun updateShowHiddenFolders(enabled: Boolean) {
+        _showHiddenFolders.value = enabled
+        prefs.edit().putBoolean("show_hidden_folders", enabled).apply()
+    }
+
+    fun updateUseMaterialUi(enabled: Boolean) {
+        _useMaterialUi.value = enabled
+        prefs.edit().putBoolean("use_material_ui", enabled).apply()
+    }
+
+    fun updateUseMaterialIcons(enabled: Boolean) {
+        _useMaterialIcons.value = enabled
+        prefs.edit().putBoolean("use_material_icons", enabled).apply()
     }
 
     fun updateReceiveLocation(context: Context, treeUri: Uri?) {

@@ -73,10 +73,12 @@ import com.example.ui.components.AppIcons
 import com.example.ui.components.getFileIcon
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.DeepAmber
+import com.example.ui.theme.LocalUseMaterialDesignUi
 
 @Composable
 fun FilesBrowserSection(
     hasMediaPermission: Boolean,
+    showHiddenFolders: Boolean = false,
     selectedEntries: SnapshotStateMap<String, BrowserEntry>,
     bottomPadding: Dp,
     onExternalPermissionLaunch: () -> Unit = {},
@@ -233,14 +235,14 @@ fun FilesBrowserSection(
     }
 
     val currentCrumb = breadcrumbs.lastOrNull()
-    LaunchedEffect(currentCrumb, hasMediaPermission, hasAllFilesAccess, permissionReloadTick) {
+    LaunchedEffect(currentCrumb, hasMediaPermission, hasAllFilesAccess, showHiddenFolders, permissionReloadTick) {
         if (currentCrumb == null) {
             entries = emptyList()
             isLoading = false
             return@LaunchedEffect
         }
         isLoading = true
-        entries = DeviceBrowser.listDirectory(context, currentCrumb)
+        entries = DeviceBrowser.listDirectory(context, currentCrumb, showHidden = showHiddenFolders)
         isLoading = false
     }
 
@@ -592,16 +594,32 @@ private fun StorageRootChip(
     onClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val bgColor = if (selected) DeepAmber else colors.surfaceVariant
-    val borderColor = if (selected) AmberGold else colors.outline
-    val contentColor = if (selected) Color.White else colors.onSurface
+    val isMaterialUi = LocalUseMaterialDesignUi.current
+    val bgColor = when {
+        isMaterialUi && selected -> colors.primaryContainer
+        isMaterialUi -> colors.surfaceVariant
+        selected -> DeepAmber
+        else -> colors.surfaceVariant
+    }
+    val borderColor = when {
+        isMaterialUi && selected -> colors.primary
+        isMaterialUi -> colors.outline.copy(alpha = 0.4f)
+        selected -> AmberGold
+        else -> colors.outline
+    }
+    val contentColor = when {
+        isMaterialUi && selected -> colors.onPrimaryContainer
+        isMaterialUi -> colors.onSurface
+        selected -> Color.White
+        else -> colors.onSurface
+    }
 
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(if (isMaterialUi) 16.dp else 14.dp))
             .background(bgColor)
-            .border(if (selected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(14.dp))
+            .border(if (selected) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(if (isMaterialUi) 16.dp else 14.dp))
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
@@ -626,7 +644,13 @@ private fun BrowserEntryRow(
     onToggleSelect: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val accentColor = if (entry.isDirectory) AmberGold else colors.primary
+    val isMaterialUi = LocalUseMaterialDesignUi.current
+    val accentColor = when {
+        isMaterialUi && entry.isDirectory -> colors.tertiary
+        isMaterialUi -> colors.primary
+        entry.isDirectory -> AmberGold
+        else -> colors.primary
+    }
     val icon = if (entry.isDirectory) {
         AppIcons.FolderOpen
     } else {
@@ -636,12 +660,14 @@ private fun BrowserEntryRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) accentColor.copy(alpha = 0.14f) else colors.surfaceVariant)
+            .clip(RoundedCornerShape(if (isMaterialUi) 18.dp else 16.dp))
+            .background(
+                if (isSelected) accentColor.copy(alpha = 0.14f) else colors.surfaceVariant
+            )
             .border(
                 width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) accentColor else colors.outline,
-                shape = RoundedCornerShape(16.dp)
+                color = if (isSelected) accentColor else colors.outline.copy(alpha = if (isMaterialUi) 0.35f else 1f),
+                shape = RoundedCornerShape(if (isMaterialUi) 18.dp else 16.dp)
             )
             .clickable { onRowClick() }
             .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),

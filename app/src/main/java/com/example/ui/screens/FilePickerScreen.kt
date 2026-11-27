@@ -119,6 +119,7 @@ fun FilePickerScreen(
     isScanningMedia: Boolean,
     isScanningApps: Boolean,
     hasMediaPermission: Boolean,
+    showHiddenFolders: Boolean = false,
     onEnsureLoaded: () -> Unit,
     onMediaPermissionResult: () -> Unit,
     onBackClick: () -> Unit,
@@ -389,6 +390,7 @@ fun FilePickerScreen(
                     PickerCategory.FILES -> {
                         FilesBrowserSection(
                             hasMediaPermission = hasMediaPermission,
+                            showHiddenFolders = showHiddenFolders,
                             selectedEntries = selectedBrowserEntries,
                             bottomPadding = if (totalSelectedCount > 0) 96.dp else 16.dp,
                             onExternalPermissionLaunch = onExternalPermissionLaunch,
@@ -551,8 +553,9 @@ fun FilePickerScreen(
                             scope.launch {
                                 val browserFileItems = if (selectedBrowserEntries.isNotEmpty()) {
                                     DeviceBrowser.collectFileItemsForSelection(
-                                        context,
-                                        selectedBrowserEntries.values.toList()
+                                        context = context,
+                                        entries = selectedBrowserEntries.values.toList(),
+                                        showHidden = showHiddenFolders
                                     )
                                 } else {
                                     emptyList()

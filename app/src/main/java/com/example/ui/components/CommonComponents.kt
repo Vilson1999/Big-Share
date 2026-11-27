@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.LocalUseMaterialDesignUi
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -73,25 +74,30 @@ fun KeepScreenOnEffect() {
 fun Modifier.atmosphericGlow(
     primaryGlow: Color,
     secondaryGlow: Color
-): Modifier = this.drawBehind {
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(primaryGlow.copy(alpha = 0.14f), Color.Transparent),
-            center = Offset(size.width * 0.15f, size.height * 0.12f),
-            radius = size.width * 0.85f
-        ),
-        radius = size.width * 0.85f,
-        center = Offset(size.width * 0.15f, size.height * 0.12f)
-    )
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(secondaryGlow.copy(alpha = 0.12f), Color.Transparent),
-            center = Offset(size.width * 0.9f, size.height * 0.82f),
-            radius = size.width * 0.75f
-        ),
-        radius = size.width * 0.75f,
-        center = Offset(size.width * 0.9f, size.height * 0.82f)
-    )
+): Modifier {
+    val isMaterialUi = LocalUseMaterialDesignUi.current
+    val primaryAlpha = if (isMaterialUi) 0.06f else 0.14f
+    val secondaryAlpha = if (isMaterialUi) 0.05f else 0.12f
+    return this.drawBehind {
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(primaryGlow.copy(alpha = primaryAlpha), Color.Transparent),
+                center = Offset(size.width * 0.15f, size.height * 0.12f),
+                radius = size.width * 0.85f
+            ),
+            radius = size.width * 0.85f,
+            center = Offset(size.width * 0.15f, size.height * 0.12f)
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(secondaryGlow.copy(alpha = secondaryAlpha), Color.Transparent),
+                center = Offset(size.width * 0.9f, size.height * 0.82f),
+                radius = size.width * 0.75f
+            ),
+            radius = size.width * 0.75f,
+            center = Offset(size.width * 0.9f, size.height * 0.82f)
+        )
+    }
 }
 
 @Composable
@@ -100,12 +106,19 @@ fun BackIconButton(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
+    val isMaterialUi = LocalUseMaterialDesignUi.current
     Box(
         modifier = modifier
             .size(48.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.surfaceVariant)
-            .border(1.dp, colors.outline, RoundedCornerShape(14.dp))
+            .clip(if (isMaterialUi) CircleShape else RoundedCornerShape(14.dp))
+            .background(if (isMaterialUi) colors.secondaryContainer else colors.surfaceVariant)
+            .then(
+                if (isMaterialUi) {
+                    Modifier
+                } else {
+                    Modifier.border(1.dp, colors.outline, RoundedCornerShape(14.dp))
+                }
+            )
             .clickable { onClick() }
             .testTag("top_bar_back_button"),
         contentAlignment = Alignment.Center
@@ -113,7 +126,7 @@ fun BackIconButton(
         Icon(
             imageVector = AppIcons.ArrowBack,
             contentDescription = "Back",
-            tint = colors.onSurface,
+            tint = if (isMaterialUi) colors.onSecondaryContainer else colors.onSurface,
             modifier = Modifier.size(20.dp)
         )
     }
@@ -339,6 +352,7 @@ fun PulseAnimation(
     }
 }
 
+@Composable
 fun getFileIcon(mimeType: String, fileName: String): ImageVector {
     val lowerName = fileName.lowercase()
     return when {

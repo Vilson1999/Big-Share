@@ -115,18 +115,24 @@ object DeviceBrowser {
 
         val sm = context.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
         val volumes = sm?.storageVolumes.orEmpty()
+        val primaryCanonical = try {
+            Environment.getExternalStorageDirectory()?.let { canonicalPath(it) }
+        } catch (_: Exception) {
+            null
+        }
 
-        // Pre-index external app dir roots to map UUIDs on API 28-29
+        // Pre-index non-primary external app dir roots to map UUIDs on API 28-29
         val externalRootCandidates = mutableListOf<File>()
         try {
-            Environment.getExternalStorageDirectory()?.let { externalRootCandidates.add(it) }
-        } catch (_: Exception) {}
-        try {
-            context.getExternalFilesDirs(null).forEach { appDir ->
-                val path = appDir?.absolutePath ?: return@forEach
+            context.getExternalFilesDirs(null).forEachIndexed { index, appDir ->
+                if (index == 0) return@forEachIndexed
+                val path = appDir?.absolutePath ?: return@forEachIndexed
                 val idx = path.indexOf("/Android/")
                 if (idx > 0) {
-                    externalRootCandidates.add(File(path.substring(0, idx)))
+                    val candidate = File(path.substring(0, idx))
+                    if (canonicalPath(candidate) != primaryCanonical) {
+                        externalRootCandidates.add(candidate)
+                    }
                 }
             }
         } catch (_: Exception) {}
@@ -134,7 +140,9 @@ object DeviceBrowser {
             try {
                 File(mountBase).listFiles()?.forEach { child ->
                     val name = child.name
-                    if (name != "self" && name != "emulated" && child.isDirectory) {
+                    if (name != "self" && name != "emulated" && child.isDirectory &&
+                        canonicalPath(child) != primaryCanonical
+                    ) {
                         externalRootCandidates.add(child)
                     }
                 }
@@ -312,12 +320,13 @@ object DeviceBrowser {
 
     suspend fun listDirectory(
         context: Context,
-        crumb: BrowserPathCrumb
+        crumb: BrowserPathCrumb,
+        showHidden: Boolean = false
     ): List<BrowserEntry> = withContext(Dispatchers.IO) {
         when {
-            crumb.fileDir != null -> listFileDirectory(context, crumb.fileDir)
+            crumb.fileDir != null -> listFileDirectory(context, crumb.fileDir, showHidden)
             crumb.treeUri != null && crumb.documentId != null -> {
-                listSafDirectory(context, crumb.treeUri, crumb.documentId)
+                listSafDirectory(context, crumb.treeUri, crumb.documentId, showHidden)
             }
             else -> emptyList()
         }
@@ -329,7 +338,15 @@ object DeviceBrowser {
         dir.absolutePath
     }
 
-    private fun listFileDirectory(context: Context, dir: File): List<BrowserEntry> {
+    private fun isHiddenPath(relativePath: String): Boolean {
+        return relativePath.split('/').any { it.startsWith(".") }
+    }
+
+    private fun listFileDirectory(
+        context: Context,
+        dir: File,
+        showHidden: Boolean
+    ): List<BrowserEntry> {
         val children = try {
             dir.listFiles()
         } catch (_: Exception) {
@@ -344,11 +361,14 @@ object DeviceBrowser {
         for (child in children) {
             val name = child.name
             if (name == "." || name == "..") continue
+            if (!showHidden && name.startsWith(".")) continue
 
             if (child.isDirectory) {
                 if (seenFolderNames.add(name.lowercase())) {
                     val count = try {
-                        child.listFiles()?.count { it.name != "." && it.name != ".." }
+                        child.listFiles()?.count {
+                            it.name != "." && it.name != ".." && (showHidden || !it.name.startsWith("."))
+                        }
                     } catch (_: Exception) {
                         null
                     }
@@ -382,59 +402,66 @@ object DeviceBrowser {
             }
         }
 
-        // Supplement with standard folders and MediaStore-indexed files on Android 11+ Scoped Storage
-        val matchedRoot = resolveStorageVolumeMatch(context, dir)
-        if (matchedRoot != null) {
-            val (rootPath, volumeName, isPrimary) = matchedRoot
-            val dirPath = canonicalPathSafe(dir).trimEnd('/')
-            val relDir = if (dirPath == rootPath) {
-                ""
-            } else {
-                dirPath.removePrefix("$rootPath/").trim('/')
-            }
+        // Supplement with standard folders and MediaStore-indexed files only when All Files Access is not granted
+        if (!hasAllFilesAccess(context)) {
+            val matchedRoot = resolveStorageVolumeMatch(context, dir)
+            if (matchedRoot != null) {
+                val (rootPath, volumeName, isPrimary) = matchedRoot
+                val dirPath = canonicalPathSafe(dir).trimEnd('/')
+                val relDir = if (dirPath == rootPath) {
+                    ""
+                } else {
+                    dirPath.removePrefix("$rootPath/").trim('/')
+                }
 
-            if (isPrimary && relDir.isEmpty()) {
-                val standardDirs = listOf(
-                    "Download", "Documents", "Pictures", "DCIM",
-                    "Music", "Movies", "Alarms", "Podcasts",
-                    "Ringtones", "Audiobooks", "Recordings"
-                )
-                for (stdName in standardDirs) {
-                    if (seenFolderNames.contains(stdName.lowercase())) continue
-                    val sub = File(dir, stdName)
-                    if (sub.exists() && sub.isDirectory && seenFolderNames.add(stdName.lowercase())) {
-                        val count = try {
-                            sub.listFiles()?.count { it.name != "." && it.name != ".." }
-                        } catch (_: Exception) {
-                            null
-                        }
-                        folders.add(
-                            BrowserEntry(
-                                id = "dir:${sub.absolutePath}",
-                                name = sub.name,
-                                isDirectory = true,
-                                sizeBytes = 0L,
-                                mimeType = DocumentsContract.Document.MIME_TYPE_DIR,
-                                lastModifiedMs = sub.lastModified(),
-                                childCount = count,
-                                file = sub
+                if (isPrimary && relDir.isEmpty()) {
+                    val standardDirs = listOf(
+                        "Download", "Documents", "Pictures", "DCIM",
+                        "Music", "Movies", "Alarms", "Podcasts",
+                        "Ringtones", "Audiobooks", "Recordings"
+                    )
+                    for (stdName in standardDirs) {
+                        if (seenFolderNames.contains(stdName.lowercase())) continue
+                        val sub = File(dir, stdName)
+                        if (sub.exists() && sub.isDirectory && seenFolderNames.add(stdName.lowercase())) {
+                            val count = try {
+                                sub.listFiles()?.count {
+                                    it.name != "." && it.name != ".." && (showHidden || !it.name.startsWith("."))
+                                }
+                            } catch (_: Exception) {
+                                null
+                            }
+                            folders.add(
+                                BrowserEntry(
+                                    id = "dir:${sub.absolutePath}",
+                                    name = sub.name,
+                                    isDirectory = true,
+                                    sizeBytes = 0L,
+                                    mimeType = DocumentsContract.Document.MIME_TYPE_DIR,
+                                    lastModifiedMs = sub.lastModified(),
+                                    childCount = count,
+                                    file = sub
+                                )
                             )
-                        )
+                        }
                     }
                 }
-            }
 
-            mergeMediaStoreDirectoryEntries(
-                context = context,
-                dir = dir,
-                rootPath = rootPath,
-                volumeName = volumeName,
-                relDir = relDir,
-                folders = folders,
-                files = files,
-                seenFolderNames = seenFolderNames,
-                seenFileNames = seenFileNames
-            )
+                if (volumeName != null) {
+                    mergeMediaStoreDirectoryEntries(
+                        context = context,
+                        dir = dir,
+                        rootPath = rootPath,
+                        volumeName = volumeName,
+                        relDir = relDir,
+                        showHidden = showHidden,
+                        folders = folders,
+                        files = files,
+                        seenFolderNames = seenFolderNames,
+                        seenFileNames = seenFileNames
+                    )
+                }
+            }
         }
 
         folders.sortBy { it.name.lowercase() }
@@ -444,7 +471,7 @@ object DeviceBrowser {
 
     private data class VolumePathMatch(
         val rootPath: String,
-        val volumeName: String,
+        val volumeName: String?,
         val isPrimary: Boolean
     )
 
@@ -454,10 +481,15 @@ object DeviceBrowser {
 
         try {
             Environment.getExternalStorageDirectory()?.let { primary ->
+                val primaryVolName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY
+                } else {
+                    "external"
+                }
                 candidates.add(
                     VolumePathMatch(
                         rootPath = canonicalPathSafe(primary).trimEnd('/'),
-                        volumeName = "external",
+                        volumeName = primaryVolName,
                         isPrimary = true
                     )
                 )
@@ -475,17 +507,21 @@ object DeviceBrowser {
                 } ?: return@forEach
                 val volPath = canonicalPathSafe(volDir).trimEnd('/')
                 val volName = when {
+                    vol.isPrimary && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> MediaStore.VOLUME_EXTERNAL_PRIMARY
                     vol.isPrimary -> "external"
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !vol.uuid.isNullOrBlank() -> vol.uuid!!.lowercase()
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> vol.mediaStoreVolumeName ?: vol.uuid?.lowercase()
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> vol.uuid?.lowercase()
                     else -> "external"
                 }
                 candidates.add(VolumePathMatch(volPath, volName, vol.isPrimary))
             }
         } catch (_: Exception) {}
 
-        return candidates.firstOrNull { match ->
-            dirPath == match.rootPath || dirPath.startsWith("${match.rootPath}/", ignoreCase = true)
-        }
+        return candidates
+            .sortedByDescending { it.rootPath.length }
+            .firstOrNull { match ->
+                dirPath == match.rootPath || dirPath.startsWith("${match.rootPath}/", ignoreCase = true)
+            }
     }
 
     private fun mergeMediaStoreDirectoryEntries(
@@ -494,6 +530,7 @@ object DeviceBrowser {
         rootPath: String,
         volumeName: String,
         relDir: String,
+        showHidden: Boolean,
         folders: MutableList<BrowserEntry>,
         files: MutableList<BrowserEntry>,
         seenFolderNames: MutableSet<String>,
@@ -517,6 +554,7 @@ object DeviceBrowser {
             add(MediaStore.MediaColumns.DATA)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(MediaStore.MediaColumns.RELATIVE_PATH)
+                add(MediaStore.MediaColumns.VOLUME_NAME)
             }
         }.toTypedArray()
 
@@ -546,13 +584,28 @@ object DeviceBrowser {
                     val relCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
                     } else -1
+                    val volCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        c.getColumnIndex(MediaStore.MediaColumns.VOLUME_NAME)
+                    } else -1
 
                     while (c.moveToNext()) {
+                        if (volCol != -1) {
+                            val rowVol = c.getString(volCol)
+                            if (!rowVol.isNullOrBlank() && !rowVol.equals(volumeName, ignoreCase = true)) {
+                                continue
+                            }
+                        }
+
                         val id = c.getLong(idCol)
                         val size = if (sizeCol != -1) c.getLong(sizeCol) else 0L
                         if (size <= 0L) continue
 
                         val dataPath = if (dataCol != -1) c.getString(dataCol) else null
+                        if (!dataPath.isNullOrBlank() && !dataPath.startsWith("$rootPath/", ignoreCase = true)) {
+                            // Never leak entries belonging to another storage volume (e.g. SD card inside Internal)
+                            continue
+                        }
+
                         val rawRelPath = if (relCol != -1) c.getString(relCol) else null
                         val itemRelDir = when {
                             rawRelPath != null -> rawRelPath.trim('/')
@@ -569,6 +622,7 @@ object DeviceBrowser {
                             ?: dataPath?.substringAfterLast('/')
                             ?: continue
                         if (name == "." || name == "..") continue
+                        if (!showHidden && (name.startsWith(".") || isHiddenPath(itemRelDir))) continue
 
                         if (itemRelDir.equals(relDir, ignoreCase = true)) {
                             if (seenFileNames.add(name.lowercase())) {
@@ -599,7 +653,9 @@ object DeviceBrowser {
                         ) {
                             val remainder = if (relPrefix.isEmpty()) itemRelDir else itemRelDir.substring(relPrefix.length)
                             val subName = remainder.substringBefore('/').trim()
-                            if (subName.isNotEmpty() && seenFolderNames.add(subName.lowercase())) {
+                            if (subName.isNotEmpty() && (showHidden || !subName.startsWith(".")) &&
+                                seenFolderNames.add(subName.lowercase())
+                            ) {
                                 val subDir = File(dir, subName)
                                 folders.add(
                                     BrowserEntry(
@@ -625,7 +681,8 @@ object DeviceBrowser {
     private fun listSafDirectory(
         context: Context,
         treeUri: Uri,
-        parentDocId: String
+        parentDocId: String,
+        showHidden: Boolean
     ): List<BrowserEntry> {
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
         val projection = arrayOf(
@@ -652,6 +709,7 @@ object DeviceBrowser {
                     val name = if (nameCol != -1) c.getString(nameCol) else null
                     val cleanName = name?.takeIf { it.isNotBlank() } ?: docId.substringAfterLast('/')
                     if (cleanName == "." || cleanName == "..") continue
+                    if (!showHidden && cleanName.startsWith(".")) continue
                     val mime = if (mimeCol != -1) c.getString(mimeCol) ?: "application/octet-stream" else "application/octet-stream"
                     val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
                     val size = if (sizeCol != -1 && !c.isNull(sizeCol)) c.getLong(sizeCol) else 0L
@@ -699,7 +757,8 @@ object DeviceBrowser {
 
     suspend fun collectFileItemsForSelection(
         context: Context,
-        entries: List<BrowserEntry>
+        entries: List<BrowserEntry>,
+        showHidden: Boolean = false
     ): List<FileItem> = withContext(Dispatchers.IO) {
         val results = mutableListOf<FileItem>()
         val seenKeys = HashSet<String>()
@@ -737,15 +796,19 @@ object DeviceBrowser {
                             dir = entry.file,
                             relativeFolder = entry.name,
                             depth = 0,
+                            showHidden = showHidden,
                             visited = visited,
                             onFile = ::addUnique
                         )
-                        collectMediaStoreFilesInFolder(
-                            context = context,
-                            dir = entry.file,
-                            rootFolderName = entry.name,
-                            onFile = ::addUnique
-                        )
+                        if (!hasAllFilesAccess(context)) {
+                            collectMediaStoreFilesInFolder(
+                                context = context,
+                                dir = entry.file,
+                                rootFolderName = entry.name,
+                                showHidden = showHidden,
+                                onFile = ::addUnique
+                            )
+                        }
                     }
                     entry.treeUri != null && entry.documentId != null -> {
                         val visited = HashSet<String>()
@@ -755,6 +818,7 @@ object DeviceBrowser {
                             docId = entry.documentId,
                             relativeFolder = entry.name,
                             depth = 0,
+                            showHidden = showHidden,
                             visited = visited,
                             onFile = ::addUnique
                         )
@@ -770,10 +834,12 @@ object DeviceBrowser {
         context: Context,
         dir: File,
         rootFolderName: String,
+        showHidden: Boolean,
         onFile: (FileItem) -> Unit
     ) {
         val match = resolveStorageVolumeMatch(context, dir) ?: return
         val (rootPath, volumeName, _) = match
+        if (volumeName == null) return
         val dirPath = canonicalPathSafe(dir).trimEnd('/')
 
         val relDir = if (dirPath == rootPath) "" else dirPath.removePrefix("$rootPath/").trim('/')
@@ -796,6 +862,7 @@ object DeviceBrowser {
             add(MediaStore.MediaColumns.DATA)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(MediaStore.MediaColumns.RELATIVE_PATH)
+                add(MediaStore.MediaColumns.VOLUME_NAME)
             }
         }.toTypedArray()
 
@@ -822,12 +889,25 @@ object DeviceBrowser {
                     val relCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
                     } else -1
+                    val volCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        c.getColumnIndex(MediaStore.MediaColumns.VOLUME_NAME)
+                    } else -1
 
                     while (c.moveToNext()) {
+                        if (volCol != -1) {
+                            val rowVol = c.getString(volCol)
+                            if (!rowVol.isNullOrBlank() && !rowVol.equals(volumeName, ignoreCase = true)) {
+                                continue
+                            }
+                        }
+
                         val id = c.getLong(idCol)
                         val size = if (sizeCol != -1) c.getLong(sizeCol) else 0L
                         if (size <= 0L) continue
                         val dataPath = if (dataCol != -1) c.getString(dataCol) else null
+                        if (!dataPath.isNullOrBlank() && !dataPath.startsWith("$rootPath/", ignoreCase = true)) {
+                            continue
+                        }
                         val rawRelPath = if (relCol != -1) c.getString(relCol) else null
                         val itemRelDir = when {
                             rawRelPath != null -> rawRelPath.trim('/')
@@ -855,6 +935,7 @@ object DeviceBrowser {
                             itemRelDir.equals(relDir, ignoreCase = true) -> ""
                             else -> itemRelDir.substring(relPrefix.length).trim('/')
                         }
+                        if (!showHidden && (name.startsWith(".") || isHiddenPath(subRel))) continue
                         val targetRelFolder = if (subRel.isEmpty()) rootFolderName else "$rootFolderName/$subRel"
                         val mime = if (mimeCol != -1) {
                             c.getString(mimeCol)?.takeIf { it.contains('/') } ?: guessMimeType(name)
@@ -884,6 +965,7 @@ object DeviceBrowser {
         dir: File,
         relativeFolder: String,
         depth: Int,
+        showHidden: Boolean,
         visited: MutableSet<String>,
         onFile: (FileItem) -> Unit
     ) {
@@ -905,11 +987,13 @@ object DeviceBrowser {
         for (child in sorted) {
             val name = child.name
             if (name == "." || name == "..") continue
+            if (!showHidden && name.startsWith(".")) continue
             if (child.isDirectory) {
                 collectFolderFromFile(
                     dir = child,
                     relativeFolder = "$relativeFolder/$name",
                     depth = depth + 1,
+                    showHidden = showHidden,
                     visited = visited,
                     onFile = onFile
                 )
@@ -935,13 +1019,14 @@ object DeviceBrowser {
         docId: String,
         relativeFolder: String,
         depth: Int,
+        showHidden: Boolean,
         visited: MutableSet<String>,
         onFile: (FileItem) -> Unit
     ) {
         if (depth > MAX_FOLDER_DEPTH) return
         if (!visited.add(docId)) return
 
-        val children = listSafDirectory(context, treeUri, docId)
+        val children = listSafDirectory(context, treeUri, docId, showHidden)
         for (child in children) {
             if (child.isDirectory) {
                 val childDocId = child.documentId ?: continue
@@ -951,6 +1036,7 @@ object DeviceBrowser {
                     docId = childDocId,
                     relativeFolder = "$relativeFolder/${child.name}",
                     depth = depth + 1,
+                    showHidden = showHidden,
                     visited = visited,
                     onFile = onFile
                 )

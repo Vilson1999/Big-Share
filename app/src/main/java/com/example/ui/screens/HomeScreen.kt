@@ -51,6 +51,7 @@ import com.example.ui.components.atmosphericGlow
 import com.example.ui.theme.DeepCyan
 import com.example.ui.theme.DeepViolet
 import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.LocalUseMaterialDesignUi
 
 @Composable
 fun HomeScreen(
@@ -63,6 +64,7 @@ fun HomeScreen(
     onReceiveClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val isMaterialUi = LocalUseMaterialDesignUi.current
     val avatarRes = UserAvatarCatalog.getDrawableRes(userAvatarIndex)
 
     Box(
@@ -89,8 +91,14 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f, fill = false)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(colors.surfaceVariant)
-                        .border(1.dp, colors.outline, RoundedCornerShape(24.dp))
+                        .background(if (isMaterialUi) colors.surfaceVariant else colors.surfaceVariant)
+                        .then(
+                            if (isMaterialUi) {
+                                Modifier
+                            } else {
+                                Modifier.border(1.dp, colors.outline, RoundedCornerShape(24.dp))
+                            }
+                        )
                         .clickable { onProfileClick() }
                         .padding(start = 6.dp, end = 14.dp, top = 6.dp, bottom = 6.dp)
                         .testTag("user_name_chip")
@@ -126,16 +134,23 @@ fun HomeScreen(
                         .heightIn(min = 48.dp)
                         .clip(CircleShape)
                         .background(colors.primaryContainer)
-                        .border(1.dp, colors.primary.copy(alpha = 0.5f), CircleShape)
+                        .then(
+                            if (isMaterialUi) {
+                                Modifier
+                            } else {
+                                Modifier.border(1.dp, colors.primary.copy(alpha = 0.5f), CircleShape)
+                            }
+                        )
                         .clickable(enabled = !isSharingApp) { onShareAppClick() }
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                         .testTag("share_app_button"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
+                    val shareTint = if (isMaterialUi) colors.onPrimaryContainer else colors.primary
                     if (isSharingApp) {
                         CircularProgressIndicator(
-                            color = colors.primary,
+                            color = shareTint,
                             strokeWidth = 2.dp,
                             modifier = Modifier.size(16.dp)
                         )
@@ -143,7 +158,7 @@ fun HomeScreen(
                         Icon(
                             imageVector = AppIcons.Share,
                             contentDescription = "Share App APK",
-                            tint = colors.primary,
+                            tint = shareTint,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -151,13 +166,13 @@ fun HomeScreen(
                         text = "Share App",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
-                        color = colors.primary,
+                        color = shareTint,
                         maxLines = 1
                     )
                 }
             }
 
-            // Centered big circular Send and Receive buttons (both with white icon & white label)
+            // Centered big Send and Receive buttons
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -175,9 +190,14 @@ fun HomeScreen(
                     GradientCircleActionButton(
                         label = "SEND",
                         icon = AppIcons.Send,
-                        gradientColors = listOf(Color(0xFF00B4D8), ElectricBlue, DeepCyan),
-                        contentColor = Color.White,
+                        gradientColors = if (isMaterialUi) {
+                            listOf(colors.primary, colors.primary)
+                        } else {
+                            listOf(Color(0xFF00B4D8), ElectricBlue, DeepCyan)
+                        },
+                        contentColor = if (isMaterialUi) colors.onPrimary else Color.White,
                         glowColor = colors.primary,
+                        isMaterialUi = isMaterialUi,
                         testTag = "send_button",
                         onClick = onSendClick
                     )
@@ -185,9 +205,14 @@ fun HomeScreen(
                     GradientCircleActionButton(
                         label = "RECEIVE",
                         icon = AppIcons.FileDownload,
-                        gradientColors = listOf(colors.secondary, DeepViolet),
-                        contentColor = Color.White,
+                        gradientColors = if (isMaterialUi) {
+                            listOf(colors.secondaryContainer, colors.secondaryContainer)
+                        } else {
+                            listOf(colors.secondary, DeepViolet)
+                        },
+                        contentColor = if (isMaterialUi) colors.onSecondaryContainer else Color.White,
                         glowColor = colors.secondary,
+                        isMaterialUi = isMaterialUi,
                         testTag = "receive_button",
                         onClick = onReceiveClick
                     )
@@ -214,27 +239,38 @@ private fun GradientCircleActionButton(
     gradientColors: List<Color>,
     contentColor: Color,
     glowColor: Color,
+    isMaterialUi: Boolean,
     testTag: String,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val buttonShape = if (isMaterialUi) RoundedCornerShape(44.dp) else CircleShape
 
     Box(
         modifier = Modifier
-            .size(208.dp)
-            .clip(CircleShape)
+            .size(if (isMaterialUi) 196.dp else 208.dp)
+            .clip(buttonShape)
             .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        glowColor.copy(alpha = 0.22f),
-                        Color.Transparent
+                if (isMaterialUi) {
+                    Brush.radialGradient(
+                        colors = listOf(glowColor.copy(alpha = 0.09f), Color.Transparent)
                     )
-                )
+                } else {
+                    Brush.radialGradient(
+                        colors = listOf(glowColor.copy(alpha = 0.22f), Color.Transparent)
+                    )
+                }
             )
-            .border(
-                width = 1.dp,
-                color = glowColor.copy(alpha = 0.28f),
-                shape = CircleShape
+            .then(
+                if (isMaterialUi) {
+                    Modifier
+                } else {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = glowColor.copy(alpha = 0.28f),
+                        shape = buttonShape
+                    )
+                }
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -242,21 +278,27 @@ private fun GradientCircleActionButton(
             modifier = Modifier
                 .size(180.dp)
                 .shadow(
-                    elevation = 24.dp,
-                    shape = CircleShape,
-                    ambientColor = glowColor.copy(alpha = 0.45f),
-                    spotColor = glowColor.copy(alpha = 0.55f)
+                    elevation = if (isMaterialUi) 10.dp else 24.dp,
+                    shape = buttonShape,
+                    ambientColor = glowColor.copy(alpha = if (isMaterialUi) 0.24f else 0.45f),
+                    spotColor = glowColor.copy(alpha = if (isMaterialUi) 0.28f else 0.55f)
                 )
-                .clip(CircleShape)
+                .clip(buttonShape)
                 .background(Brush.linearGradient(colors = gradientColors))
-                .border(
-                    width = 2.dp,
-                    color = Color.White.copy(alpha = 0.35f),
-                    shape = CircleShape
+                .then(
+                    if (isMaterialUi) {
+                        Modifier
+                    } else {
+                        Modifier.border(
+                            width = 2.dp,
+                            color = Color.White.copy(alpha = 0.35f),
+                            shape = buttonShape
+                        )
+                    }
                 )
                 .clickable(
                     interactionSource = interactionSource,
-                    indication = ripple(color = Color.White, bounded = true),
+                    indication = ripple(color = contentColor, bounded = true),
                     onClick = onClick
                 )
                 .testTag(testTag),
